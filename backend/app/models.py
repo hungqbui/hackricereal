@@ -112,3 +112,32 @@ class PlanRevision(Base):
     )
 
     plan: Mapped[MealPlan] = relationship(back_populates="revisions")
+
+
+class UserProfile(Base):
+    """Goals and dietary preferences. One row per user, created on first save."""
+
+    __tablename__ = "user_profiles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    calorie_goal: Mapped[int] = mapped_column(Integer, default=2200)
+    protein_goal: Mapped[int] = mapped_column(Integer, default=120)
+    # none | vegetarian | vegan | pescatarian | halal | kosher
+    diet: Mapped[str] = mapped_column(String(20), default="none")
+
+    # Lists and the schedule map travel as JSON: they are read and written
+    # whole, and never queried by element.
+    allergies: Mapped[list] = mapped_column(JSONType, default=list)
+    avoid: Mapped[list] = mapped_column(JSONType, default=list)
+    favorite_location_ids: Mapped[list] = mapped_column(JSONType, default=list)
+    schedule: Mapped[dict] = mapped_column(JSONType, default=dict)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

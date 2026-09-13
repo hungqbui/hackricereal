@@ -29,6 +29,54 @@ def test_flatten_menu_echoes_requested_location_and_date(recorded):
     assert menu["period_id"] == period_id
 
 
+def test_client_asks_for_the_app_view_of_the_menu(app_env, monkeypatch):
+    """Sec-Fetch-Dest decides whether upstream applies the hall's hours.
+
+    With curl_cffi's default "document" it returns every item even on a day the
+    hall is closed; "empty" (what dineoncampus.com's fetch() sends) returns
+    closedOnDate and no categories. The session must override the default.
+    """
+    from app.services import dineoncampus
+
+    captured = {}
+
+    class RecordingSession:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(dineoncampus, "HAS_CURL_CFFI", True)
+    monkeypatch.setattr(dineoncampus, "_CurlSession", RecordingSession)
+    dineoncampus.DineOnCampusClient()._ensure_session()
+
+    headers = captured["headers"]
+    assert headers["Sec-Fetch-Dest"] == "empty"
+    assert headers["Sec-Fetch-Mode"] == "cors"
+    assert headers["Sec-Fetch-Site"] == "same-site"
+
+
+def test_a_closed_day_flattens_to_no_items():
+    """The payload upstream sends when the hall is shut on the requested date."""
+    payload = {
+        "id": None,
+        "locationId": "599da32a3191a2fc6b417fee",
+        "date": "2026-09-13",
+        "closedOnDate": True,
+        "status": {
+            "label": "closed",
+            "message": "Closed. Opens Monday at 7:00am.",
+            "color": "red",
+        },
+        "period": {"id": "1", "name": None, "slug": None, "categories": []},
+    }
+
+    menu = flatten_menu(payload, "599da32a3191a2fc6b417fee", "2026-09-13")
+
+    assert menu["closed"] is True
+    assert menu["status"] == "Closed. Opens Monday at 7:00am."
+    assert menu["items"] == []
+    assert menu["categories"] == []
+
+
 def test_upstream_payload_carries_the_date_we_asked_for(recorded):
     for label, date in [("moody_a", DATE_A), ("moody_b", DATE_B)]:
         for payload in recorded[label]["menus"].values():
@@ -185,17 +233,21 @@ async def test_locations_endpoint_lists_known_dining_halls(api):
     assert all(loc["id"] and loc["name"] for loc in locations)
 
 
-async def test_menu_responses_are_cached_per_date(api, upstream):
-    """The same query must not re-hit upstream; a different date must."""
+async def test_menu_responses_are_never_cached(api, upstream):
+    """Every request reaches upstream, so a republished menu shows up at once."""
     args = {"date": DATE_A, "period": "6aa5f5c5271b6d7019756f44"}
     await api.get(f"/dining/locations/{MOODY}/menu", params=args)
     after_first = len(upstream.calls)
 
     await api.get(f"/dining/locations/{MOODY}/menu", params=args)
-    assert len(upstream.calls) == after_first, "identical request should hit cache"
+    assert len(upstream.calls) == after_first + 1, "identical request must re-fetch"
 
     await api.get(
         f"/dining/locations/{MOODY}/menu",
         params={**args, "date": DATE_B},
     )
-    assert len(upstream.calls) == after_first + 1, "new date must bypass cache"
+    assert len(upstream.calls) == after_first + 2
+    assert upstream.calls[-1] == (
+        f"/locations/{MOODY}/menu",
+        {"date": DATE_B, "period": args["period"]},
+    )

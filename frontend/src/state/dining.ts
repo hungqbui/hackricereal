@@ -3,9 +3,9 @@
  *
  * `GET /dining/locations` is one request, but the open/closed sentence lives on
  * `/details`, which is one request per hall — twenty of them on this campus.
- * They are fetched through a small pool and cached for the session; the backend
- * caches upstream for 15 minutes on top of that, so the Dining tab costs at
- * most one burst per session.
+ * They are fetched through a small pool and cached for the session, so the
+ * Dining tab costs at most one burst per session. The backend does not cache
+ * upstream, so each of those requests reaches DineOnCampus.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

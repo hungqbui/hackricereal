@@ -8,7 +8,6 @@ where curl_cffi will not build (it will usually be blocked).
 """
 
 import asyncio
-import time
 from typing import Any
 
 from ..config import get_settings
@@ -24,6 +23,16 @@ _BROWSER_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Origin": "https://dineoncampus.com",
     "Referer": "https://dineoncampus.com/",
+    # Upstream answers differently depending on Sec-Fetch-Dest. A "document"
+    # request -- which curl_cffi's Chrome impersonation sends by default, as if
+    # the URL were opened in a tab -- gets the raw menu with no hours applied:
+    # no closedOnDate, no status, and a full item list for a hall that is shut
+    # that day. "empty" is what dineoncampus.com's own fetch() calls send, and
+    # gets the real answer: closedOnDate true and no categories when closed.
+    # These override the impersonation defaults.
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
 }
 
 try:  # pragma: no cover - import-time capability probe
@@ -39,37 +48,13 @@ class DineOnCampusError(RuntimeError):
     pass
 
 
-class _TTLCache:
-    """Small in-process cache; menus change at most a few times a day."""
-
-    def __init__(self, ttl: int) -> None:
-        self._ttl = ttl
-        self._data: dict[str, tuple[float, Any]] = {}
-        self._lock = asyncio.Lock()
-
-    async def get(self, key: str) -> Any | None:
-        async with self._lock:
-            hit = self._data.get(key)
-            if not hit:
-                return None
-            expires, value = hit
-            if expires < time.monotonic():
-                self._data.pop(key, None)
-                return None
-            return value
-
-    async def set(self, key: str, value: Any) -> None:
-        async with self._lock:
-            self._data[key] = (time.monotonic() + self._ttl, value)
-
-
 class DineOnCampusClient:
-    def __init__(self, ttl: int | None = None, site_id: str | None = None) -> None:
+    """Every call goes to upstream. Nothing is cached, so a menu the hall
+    republishes shows up on the next request rather than minutes later."""
+
+    def __init__(self, site_id: str | None = None) -> None:
         settings = get_settings()
         self.site_id = site_id or settings.dineoncampus_site_id
-        self._cache = _TTLCache(
-            ttl if ttl is not None else settings.dineoncampus_cache_ttl
-        )
         self._session: Any | None = None
 
     def _ensure_session(self) -> Any:
@@ -100,11 +85,6 @@ class DineOnCampusClient:
         self._session = None
 
     async def _get(self, path: str, params: dict | None = None) -> Any:
-        key = f"{path}?{sorted((params or {}).items())}"
-        cached = await self._cache.get(key)
-        if cached is not None:
-            return cached
-
         url = f"{BASE_URL}{path}"
         last_error: str | None = None
 
@@ -127,7 +107,6 @@ class DineOnCampusClient:
                     except ValueError as exc:
                         last_error = f"invalid JSON: {exc}"
                     else:
-                        await self._cache.set(key, payload)
                         return payload
 
             if attempt < 2:

@@ -4,14 +4,18 @@ from datetime import date as Date
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from ..deps import CurrentUser, SessionDep
-from ..models import MealPlan, PlanRevision
+from ..models import MealPlan, PlanRevision, UserProfile
 from ..schemas import (
+    PlanApplyRequest,
     PlanGenerateRequest,
     PlanOut,
+    PlanProposalOut,
     PlanRefineRequest,
     PlanSummaryOut,
+    ProfileOut,
 )
 from ..services import gemini
 from ..services.dineoncampus import DineOnCampusClient, DineOnCampusError
@@ -105,6 +109,120 @@ async def _get_owned_plan(
     return plan
 
 
+async def _profile_context(
+    user: CurrentUser, session: SessionDep
+) -> tuple[dict, str | None]:
+    """The saved profile as (default targets, dietary notes).
+
+    A user who has never saved a profile gets neither, so the planner is
+    not steered by goals they did not choose.
+    """
+    row = await session.get(UserProfile, user.id)
+    if row is None:
+        return {}, None
+    profile = ProfileOut.model_validate(row)
+    targets = {"calories": profile.calorie_goal, "protein_g": profile.protein_goal}
+    return targets, gemini.build_profile_notes(profile.model_dump())
+
+
+async def _plan_menus(plan: MealPlan, request: Request) -> tuple[list[dict], str | None]:
+    """The menus a stored plan was drawn from, refetched from upstream."""
+    sources = plan.sources or {}
+    location_id = sources.get("location_id")
+    if not location_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This plan has no source location recorded and cannot be refined.",
+        )
+    menus, location_name, _ = await _load_menus(
+        _client(request),
+        location_id,
+        plan.plan_date.isoformat(),
+        sources.get("period_ids") or [],
+    )
+    return menus, location_name
+
+
+async def _propose(
+    plan: MealPlan,
+    instruction: str,
+    request: Request,
+    user: CurrentUser,
+    session: SessionDep,
+) -> tuple[dict, str, str, str]:
+    """Run a refinement and hydrate it without touching the stored plan.
+
+    Returns (content, tool_used, rationale, model).
+    """
+    menus, location_name = await _plan_menus(plan, request)
+    # The profile as it is now, so an allergy added since generation applies.
+    _, dietary_notes = await _profile_context(user, session)
+
+    try:
+        selection, tool_used, rationale, model_used = await gemini.refine_selection(
+            current=plan.content,
+            menus=menus,
+            instruction=instruction,
+            targets=plan.targets or {},
+            dietary_notes=dietary_notes,
+            date=plan.plan_date.isoformat(),
+            location_name=location_name,
+        )
+    except gemini.GeminiUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Refinement requires Gemini. Set GEMINI_API_KEY to enable it."
+            ),
+        ) from exc
+    except gemini.GeminiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+
+    catalog = gemini.build_catalog(menus)
+    content = gemini.hydrate_plan(selection, catalog, menus, plan.targets or {})
+    return content, tool_used, rationale, model_used
+
+
+async def _record_revision(
+    plan: MealPlan,
+    session: SessionDep,
+    *,
+    content: dict,
+    instruction: str,
+    tool_used: str,
+    rationale: str | None,
+    model: str | None,
+) -> PlanOut:
+    plan.content = content
+    plan.title = content.get("title") or plan.title
+    plan.model = model
+    plan.revision_count += 1
+
+    session.add(
+        PlanRevision(
+            plan_id=plan.id,
+            revision_number=plan.revision_count,
+            instruction=instruction,
+            tool_used=tool_used,
+            rationale=rationale,
+            content=content,
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Another revision claimed this number first.
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This plan was changed at the same time. Reload it and try again.",
+        ) from None
+    await session.refresh(plan)
+    return PlanOut.model_validate(plan)
+
+
 @router.post("/generate", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
 async def generate_plan(
     payload: PlanGenerateRequest,
@@ -117,12 +235,13 @@ async def generate_plan(
         _client(request), payload.location_id, date, payload.period_ids
     )
 
-    # The users table stores credentials only, so targets and dietary notes
-    # travel with the request rather than living on a profile.
+    # Targets on the request win; otherwise the saved goals apply. Diet,
+    # allergies and dislikes always come from the saved profile.
+    profile_targets, dietary_notes = await _profile_context(user, session)
     targets = (
         payload.targets.model_dump(exclude_none=True)
         if payload.targets is not None
-        else {}
+        else profile_targets
     )
 
     try:
@@ -130,13 +249,13 @@ async def generate_plan(
             menus=menus,
             targets=targets,
             constraints=payload.constraints,
-            dietary_notes=None,
+            dietary_notes=dietary_notes,
             date=date,
             location_name=location_name,
         )
     except gemini.GeminiUnavailable:
         selection = gemini.fallback_selection(
-            menus, targets, payload.constraints, None
+            menus, targets, payload.constraints, dietary_notes
         )
         model_used = "fallback-greedy"
     except gemini.GeminiError as exc:
@@ -189,63 +308,79 @@ async def refine_plan(
     session: SessionDep,
 ) -> PlanOut:
     plan = await _get_owned_plan(plan_id, user, session)
+    content, tool_used, rationale, model_used = await _propose(
+        plan, payload.instruction, request, user, session
+    )
+    return await _record_revision(
+        plan,
+        session,
+        content=content,
+        instruction=payload.instruction,
+        tool_used=tool_used,
+        rationale=rationale,
+        model=model_used,
+    )
 
-    sources = plan.sources or {}
-    location_id = sources.get("location_id")
-    if not location_id:
+
+@router.post("/{plan_id}/propose", response_model=PlanProposalOut)
+async def propose_refinement(
+    plan_id: uuid.UUID,
+    payload: PlanRefineRequest,
+    request: Request,
+    user: CurrentUser,
+    session: SessionDep,
+) -> PlanProposalOut:
+    """Refine without saving, so the student can review the change first."""
+    plan = await _get_owned_plan(plan_id, user, session)
+    content, tool_used, rationale, model_used = await _propose(
+        plan, payload.instruction, request, user, session
+    )
+    return PlanProposalOut(
+        plan_id=plan.id,
+        base_revision=plan.revision_count,
+        instruction=payload.instruction,
+        tool_used=tool_used,
+        rationale=rationale,
+        model=model_used,
+        content=content,
+    )
+
+
+@router.post("/{plan_id}/apply", response_model=PlanOut)
+async def apply_proposal(
+    plan_id: uuid.UUID,
+    payload: PlanApplyRequest,
+    request: Request,
+    user: CurrentUser,
+    session: SessionDep,
+) -> PlanOut:
+    """Save a proposal the student confirmed.
+
+    Only the selections are read back. Every item is resolved against the
+    live menu again and every macro recomputed, as for a model reply, so an
+    edited proposal cannot store invented nutrition.
+    """
+    plan = await _get_owned_plan(plan_id, user, session)
+    if payload.base_revision != plan.revision_count:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This plan has no source location recorded and cannot be refined.",
+            detail="This plan changed after the proposal was made. Ask again for a fresh one.",
         )
 
-    date = plan.plan_date.isoformat()
-    menus, location_name, _ = await _load_menus(
-        _client(request), location_id, date, sources.get("period_ids") or []
-    )
-
-    try:
-        selection, tool_used, rationale, model_used = await gemini.refine_selection(
-            current=plan.content,
-            menus=menus,
-            instruction=payload.instruction,
-            targets=plan.targets or {},
-            dietary_notes=None,
-            date=date,
-            location_name=location_name,
-        )
-    except gemini.GeminiUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Refinement requires Gemini. Set GEMINI_API_KEY to enable it."
-            ),
-        ) from exc
-    except gemini.GeminiError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
-        ) from exc
-
+    menus, _ = await _plan_menus(plan, request)
     catalog = gemini.build_catalog(menus)
-    content = gemini.hydrate_plan(selection, catalog, menus, plan.targets or {})
-
-    plan.content = content
-    plan.title = content.get("title") or plan.title
-    plan.model = model_used
-    plan.revision_count += 1
-
-    session.add(
-        PlanRevision(
-            plan_id=plan.id,
-            revision_number=plan.revision_count,
-            instruction=payload.instruction,
-            tool_used=tool_used,
-            rationale=rationale,
-            content=content,
-        )
+    content = gemini.hydrate_plan(
+        payload.content.model_dump(), catalog, menus, plan.targets or {}
     )
-    await session.commit()
-    await session.refresh(plan)
-    return PlanOut.model_validate(plan)
+    return await _record_revision(
+        plan,
+        session,
+        content=content,
+        instruction=payload.instruction,
+        tool_used=payload.tool_used,
+        rationale=payload.rationale,
+        model=plan.model,
+    )
 
 
 @router.get("", response_model=list[PlanSummaryOut])

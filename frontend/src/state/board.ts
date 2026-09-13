@@ -90,7 +90,7 @@ function errorMessage(error: unknown): string {
 }
 
 /** Run tasks with a small pool so a 7-day week is not 7 parallel requests. */
-async function pooled<T>(items: T[], limit: number, run: (item: T) => Promise<void>) {
+export async function pooled<T>(items: T[], limit: number, run: (item: T) => Promise<void>) {
   let cursor = 0
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (cursor < items.length) {
@@ -277,9 +277,26 @@ export function usePlanBoard(userId: string | null) {
     [patchDay, userId],
   )
 
+  /** Swap in plans saved elsewhere — the Advisor's confirmed changes. */
+  const replacePlans = useCallback(
+    (plans: Plan[]) => {
+      const current = boardRef.current
+      if (!current) return
+      const byId = new Map(plans.map((plan) => [plan.id, plan]))
+      commit({
+        ...current,
+        days: current.days.map((day) => {
+          const plan = day.plan ? byId.get(day.plan.id) : undefined
+          return plan ? { ...day, plan, status: 'ready' as DayStatus, message: null } : day
+        }),
+      })
+    },
+    [commit],
+  )
+
   const clear = useCallback(() => {
     commit(null)
   }, [commit])
 
-  return { board, busy, generate, refine, clear }
+  return { board, busy, generate, refine, replacePlans, clear }
 }

@@ -15,11 +15,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Location, Plan } from '../api/types'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
 import type { AdvisorMessage, AdvisorStore } from '../state/advisor'
-import { QUICK_PROMPTS } from '../state/advisor'
+import { quickPrompts } from '../state/advisor'
+import type { Board } from '../state/board'
 import type { DayTotals, MealSlot } from '../state/meals'
 import { slotForPeriod } from '../state/meals'
 import type { Hall } from '../state/dining'
-import type { StudentProfile } from '../state/profile'
+import { preferenceTags, type StudentProfile } from '../state/profile'
+import { ScheduleChangeCard } from './ScheduleChangeCard'
 import {
   IconCalories,
   IconClock,
@@ -46,6 +48,10 @@ export interface AdvisorScreenProps {
   onAsk: (question: string) => void
   onLogPlan: (plan: Plan, locationName: string | null, slot: MealSlot) => void
   loggedPlanIds: Set<string>
+  /** The week's plan, so suggestions can offer to edit it. */
+  board: Board | null
+  onConfirmChange: (messageId: string) => void
+  onDeclineChange: (messageId: string) => void
 }
 
 /** The recommendation card lists at most this many items before summarising. */
@@ -88,6 +94,9 @@ export function AdvisorScreen({
   onAsk,
   onLogPlan,
   loggedPlanIds,
+  board,
+  onConfirmChange,
+  onDeclineChange,
 }: AdvisorScreenProps) {
   const [draft, setDraft] = useState('')
   const thread = useRef<HTMLDivElement>(null)
@@ -210,9 +219,17 @@ export function AdvisorScreen({
           </aside>
 
           <section className="quick-prompts" data-stagger>
-            <h2 className="eyebrow">Quick suggestions</h2>
+            <h2 className="eyebrow">Suggested for you</h2>
+            {preferenceTags(profile).length > 0 && (
+              <p className="pref-tags">
+                <span>Planning around</span>
+                {preferenceTags(profile).map((tag) => (
+                  <em key={tag}>{tag}</em>
+                ))}
+              </p>
+            )}
             <div className="chip-row wrap">
-              {QUICK_PROMPTS.map((prompt) => (
+              {quickPrompts(profile, consumed, board).map((prompt) => (
                 <SuggestionChip key={prompt} onClick={() => onAsk(prompt)}>
                   {prompt}
                 </SuggestionChip>
@@ -230,6 +247,8 @@ export function AdvisorScreen({
               profile={profile}
               onLog={onLogPlan}
               onAlternatives={() => void advisor.alternatives(message)}
+              onConfirmChange={() => onConfirmChange(message.id)}
+              onDeclineChange={() => onDeclineChange(message.id)}
               logged={message.plan ? loggedPlanIds.has(message.plan.id) : false}
               busy={advisor.state === 'thinking'}
             />
@@ -290,6 +309,8 @@ function MessageTurn({
   profile,
   onLog,
   onAlternatives,
+  onConfirmChange,
+  onDeclineChange,
   logged,
   busy,
 }: {
@@ -298,6 +319,8 @@ function MessageTurn({
   profile: StudentProfile
   onLog: (plan: Plan, locationName: string | null, slot: MealSlot) => void
   onAlternatives: () => void
+  onConfirmChange: () => void
+  onDeclineChange: () => void
   logged: boolean
   busy: boolean
 }) {
@@ -326,6 +349,13 @@ function MessageTurn({
             onAlternatives={onAlternatives}
             logged={logged}
             busy={busy}
+          />
+        )}
+        {message.change && (
+          <ScheduleChangeCard
+            change={message.change}
+            onConfirm={onConfirmChange}
+            onDecline={onDeclineChange}
           />
         )}
       </div>

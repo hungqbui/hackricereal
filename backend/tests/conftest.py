@@ -91,7 +91,7 @@ class RecordedUpstream:
     """A stand-in HTTP session that replays recorded payloads.
 
     It substitutes for the client's *transport*, not for ``_get``, so the
-    real caching, retry and error handling still run. Any request the
+    real retry and error handling still run. Any request the
     recordings do not cover returns 404, so a test can never silently
     fall through to the live network.
     """

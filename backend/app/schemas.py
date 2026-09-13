@@ -1,8 +1,9 @@
 import uuid
 from datetime import date as Date
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 
 # ---------- auth ----------
@@ -40,6 +41,46 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+# ---------- profile ----------
+
+Diet = Literal["none", "vegetarian", "vegan", "pescatarian", "halal", "kosher"]
+
+# Allergies and dislikes are pasted into every planning prompt, so both the
+# list lengths and the entries themselves are capped.
+_Allergen = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+_Dislike = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+_ClockTime = Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
+class ProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    display_name: str | None = None
+    calorie_goal: int = 2200
+    protein_goal: int = 120
+    diet: str = "none"
+    allergies: list[str] = []
+    avoid: list[str] = []
+    favorite_location_ids: list[str] = []
+    schedule: dict[str, str] = {}
+    # None until the first save, which is how a client tells defaults apart.
+    updated_at: datetime | None = None
+
+
+class ProfileUpdate(BaseModel):
+    """Every field optional: the UI saves one setting at a time."""
+
+    display_name: str | None = Field(default=None, max_length=120)
+    calorie_goal: int | None = Field(default=None, ge=1000, le=6000)
+    protein_goal: int | None = Field(default=None, ge=20, le=400)
+    diet: Diet | None = None
+    # DineOnCampus allergen vocabulary: "Milk", "Peanut", "Tree Nut", ...
+    allergies: list[_Allergen] | None = Field(default=None, max_length=20)
+    avoid: list[_Dislike] | None = Field(default=None, max_length=30)
+    favorite_location_ids: list[str] | None = Field(default=None, max_length=20)
+    schedule: dict[Literal["breakfast", "lunch", "dinner"], _ClockTime] | None = None
 
 
 # ---------- dining ----------
@@ -111,6 +152,41 @@ class PlanGenerateRequest(BaseModel):
 
 class PlanRefineRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=2000)
+
+
+class SelectedItemIn(BaseModel):
+    item_id: str | None = None
+    servings: float = Field(default=1.0, gt=0, le=4)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class SelectedMealIn(BaseModel):
+    period_id: str | None = None
+    notes: str | None = Field(default=None, max_length=1000)
+    items: list[SelectedItemIn] = Field(default=[], max_length=40)
+
+
+class PlanSelectionIn(BaseModel):
+    """A plan's selections only.
+
+    Clients echo back a whole proposal; names, macros and totals on it are
+    ignored because the server recomputes them from the menu.
+    """
+
+    title: str | None = Field(default=None, max_length=200)
+    summary: str | None = Field(default=None, max_length=2000)
+    meals: list[SelectedMealIn] = Field(default=[], max_length=12)
+    constraint_notes: list[str] = Field(default=[], max_length=30)
+    warnings: list[str] = Field(default=[], max_length=30)
+
+
+class PlanApplyRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=2000)
+    # The revision the proposal was made against; a mismatch means it is stale.
+    base_revision: int = Field(ge=0)
+    tool_used: Literal["rewrite_meal_plan", "adjust_meal_items"]
+    rationale: str | None = Field(default=None, max_length=2000)
+    content: PlanSelectionIn
 
 
 class PlannedItemOut(BaseModel):
@@ -190,3 +266,15 @@ class PlanOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     revisions: list[RevisionOut] = []
+
+
+class PlanProposalOut(BaseModel):
+    """A refinement that has not been saved. Send it to /apply to keep it."""
+
+    plan_id: uuid.UUID
+    base_revision: int
+    instruction: str
+    tool_used: str
+    rationale: str | None
+    model: str | None
+    content: PlanContentOut

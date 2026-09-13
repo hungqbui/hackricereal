@@ -2,11 +2,10 @@
  * Profile — the settings that steer every recommendation.
  *
  * Each row says, in the copy itself, how it reaches the advisor: goals become
- * the `targets` on `POST /plans/generate`, and diet, allergies and dislikes
- * become sentences in its `constraints` string. Nothing here is decoration.
+ * the `targets` on `POST /plans/generate`, and the backend adds diet, allergies
+ * and dislikes to every planning prompt. Nothing here is decoration.
  *
- * These preferences live in `localStorage` today — the backend has no profile
- * table yet. See `docs/BACKEND.md` for the endpoints that would replace it.
+ * Saved to `PUT /profile` as the student edits; see `state/profile.ts`.
  */
 
 import { useState } from 'react'
@@ -18,6 +17,7 @@ import {
   DIET_LABELS,
   type DietPreference,
   type ProfileStore,
+  type ProfileSync,
 } from '../state/profile'
 import {
   IconAllergen,
@@ -42,8 +42,15 @@ export interface ProfileScreenProps {
   gemini: { configured: boolean; model: string | null } | null
 }
 
+const SYNC_LABELS: Record<ProfileSync, string> = {
+  loading: 'Loading…',
+  saving: 'Saving…',
+  saved: 'Saved to your account',
+  offline: 'Offline — kept on this device',
+}
+
 export function ProfileScreen({ store, locations, gemini }: ProfileScreenProps) {
-  const { profile, update, reset } = store
+  const { profile, update, reset, sync } = store
   const { user, logout } = useAuth()
   const [avoidDraft, setAvoidDraft] = useState('')
 
@@ -76,6 +83,9 @@ export function ProfileScreen({ store, locations, gemini }: ProfileScreenProps) 
     <div className="screen profile-screen">
       <header className="screen-head">
         <h1>Profile</h1>
+        <span className={`sync-status ${sync}`} role="status">
+          {SYNC_LABELS[sync]}
+        </span>
       </header>
 
       <Card className="profile-identity">
@@ -97,8 +107,8 @@ export function ProfileScreen({ store, locations, gemini }: ProfileScreenProps) 
 
       <p className="settings-note">
         <IconTarget size={15} aria-hidden="true" />
-        Everything below is sent with each recommendation — goals as numeric targets, the rest as
-        instructions the planner has to respect.
+        Saved to your account. The Advisor reads it for every recommendation and schedule change —
+        goals as numeric targets, the rest as rules the planner has to respect.
       </p>
 
       {/* ------------------------------------------------------------ goals */}
@@ -202,6 +212,7 @@ export function ProfileScreen({ store, locations, gemini }: ProfileScreenProps) 
               }}
               placeholder="Add something to avoid"
               aria-label="Add a food to avoid"
+              maxLength={100}
             />
             <button type="button" className="button" onClick={addAvoid} disabled={!avoidDraft.trim()}>
               <IconPlus size={15} />
