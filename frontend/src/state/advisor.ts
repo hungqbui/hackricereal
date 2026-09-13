@@ -1,11 +1,10 @@
 /**
- * The Advisor: a question in, one real meal recommendation out.
+ * The Advisor: a question in, one real meal recommendation out — or, when the
+ * question is about the plan already on the student's week, a proposed change
+ * to that plan that nothing saves until the student confirms it.
  *
- * There is no chat endpoint on the backend, and there does not need to be —
- * `POST /plans/generate` already takes a natural-language `constraints` string
- * and returns items chosen off the live menu with server-computed macros. The
- * Advisor drives that endpoint scoped to a **single meal period** so the plan
- * comes back as one meal rather than a whole day:
+ * Recommendations drive `POST /plans/generate` scoped to a **single meal
+ * period** so the plan comes back as one meal rather than a whole day:
  *
  *   1. pick the hall — the student's favourite, or one named in the question
  *   2. pick the period — whatever the hall is serving around now
@@ -14,19 +13,45 @@
  *   4. send the question verbatim, plus the diet/allergy sentences and a line
  *      about what has already been eaten, as `constraints`
  *
- * "See alternatives" is `POST /plans/{id}/refine`, which needs a Gemini key;
- * without one the backend answers 503 and that message is shown as-is.
+ * The backend also reads the saved profile on every call, so preferences apply
+ * even when a question never mentions them.
+ *
+ * Schedule changes go through `POST /plans/{id}/propose`, which runs the
+ * refinement without saving; the card shows the difference, and only "Update
+ * my schedule" calls `POST /plans/{id}/apply`. "See alternatives" is still
+ * `POST /plans/{id}/refine`. All three need a Gemini key; without one the
+ * backend answers 503 and that message is shown as-is.
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { ApiError, api } from '../api/client'
-import type { Location, NutritionTargets, Plan } from '../api/types'
-import { todayISO } from '../lib/dates'
-import { matchLocation } from '../lib/parse'
+import type { Location, NutritionTargets, Plan, PlanProposal } from '../api/types'
+import { addDays, describeRange, friendlyDate, todayISO, weekdayLabel } from '../lib/dates'
+import { interpret, matchLocation, type PeriodName } from '../lib/parse'
+import { diffPlan, type PlanDiff } from '../lib/planDiff'
 import { fetchPeriods } from './availability'
+import { pooled, type Board } from './board'
 import type { DayTotals } from './meals'
-import { listSentence, profileConstraints, type StudentProfile } from './profile'
+import { DIET_LABELS, listSentence, profileConstraints, type StudentProfile } from './profile'
+
+export type ChangeStatus = 'pending' | 'applying' | 'applied' | 'declined'
+
+export interface DayChange {
+  date: string
+  locationName: string
+  before: Plan
+  proposal: PlanProposal
+  diff: PlanDiff
+}
+
+export interface ScheduleChange {
+  instruction: string
+  days: DayChange[]
+  status: ChangeStatus
+  /** Why the last save failed, or which days did not save. */
+  error: string | null
+}
 
 export interface AdvisorMessage {
   id: string
@@ -38,25 +63,164 @@ export interface AdvisorMessage {
   locationName: string | null
   createdAt: string
   error?: boolean
+  /** Present on the assistant turn that proposes an edit to the week's plan. */
+  change?: ScheduleChange
 }
 
 export type AdvisorState = 'idle' | 'thinking' | 'ready' | 'error'
-
-/** The chips shown before the first question. */
-export const QUICK_PROMPTS = [
-  'What should I eat now?',
-  'High protein dinner',
-  'Under 600 calories',
-  'Vegetarian options',
-] as const
 
 /** Never ask the planner for less than a real meal, however full the day is. */
 const MIN_CALORIE_TARGET = 350
 const MIN_PROTEIN_TARGET = 15
 
+/** Proposals each run a Gemini call; two at a time keeps a week under rate limits. */
+const PROPOSAL_CONCURRENCY = 2
+
 function newId(): string {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 }
+
+function assistantMessage(text: string, extra: Partial<AdvisorMessage> = {}): AdvisorMessage {
+  return {
+    id: newId(),
+    role: 'assistant',
+    text,
+    plan: null,
+    locationName: null,
+    createdAt: new Date().toISOString(),
+    ...extra,
+  }
+}
+
+/* -------------------------------------------------------- quick prompts */
+
+/**
+ * The chips shown before the first question, built from the profile and the
+ * day so far: the student's diet, the protein and calories they have left, and
+ * — when there is a plan on the week — a prompt that edits it.
+ */
+export function quickPrompts(
+  profile: StudentProfile,
+  consumed: DayTotals,
+  board: Board | null,
+  at = new Date(),
+): string[] {
+  const hour = at.getHours() + at.getMinutes() / 60
+  const meal = hour < 10.5 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner'
+  const proteinLeft = profile.proteinGoal - consumed.protein_g
+  const caloriesLeft = profile.calorieGoal - consumed.calories
+
+  const prompts = ['What should I eat now?']
+  if (profile.diet !== 'none') prompts.push(`${DIET_LABELS[profile.diet]} ${meal} ideas`)
+  prompts.push(
+    consumed.meals > 0 && proteinLeft >= 25
+      ? `Help me get ${roundTo(proteinLeft, 5)}g more protein`
+      : `High protein ${meal}`,
+  )
+  prompts.push(
+    consumed.meals > 0 && caloriesLeft > MIN_CALORIE_TARGET
+      ? `A ${meal} under ${roundTo(Math.min(caloriesLeft, 900), 50)} calories`
+      : 'Under 600 calories',
+  )
+
+  const today = todayISO()
+  const planned = board?.days.find((day) => day.plan && day.date >= today)
+  if (planned) prompts.push(`Make ${possessiveDay(planned.date, today)} plan higher protein`)
+
+  return [...new Set(prompts)].slice(0, 5)
+}
+
+function roundTo(value: number, step: number): number {
+  return Math.max(step, Math.round(value / step) * step)
+}
+
+function possessiveDay(date: string, today: string): string {
+  if (date === today) return "today's"
+  if (date === addDays(today, 1)) return "tomorrow's"
+  return `${weekdayLabel(date, 'long')}'s`
+}
+
+/* ------------------------------------------------- schedule-edit intent */
+
+const STRONG_EDIT =
+  /\b(change|swap|switch|replace|update|adjust|tweak|edit|remove|drop|redo|rework|rebuild|rearrange|shuffle)\b/
+const SOFT_EDIT =
+  /\b(make|add|more|less|fewer|lighter|heavier|lower|higher|raise|reduce|increase|cut|without|instead)\b/
+const SCHEDULE_WORD = /\b(plans?|schedule|week|weekly|board|planned)\b/
+const DAY_WORD = new RegExp(
+  [
+    /\b(today|tonight|tomorrow|mon(day)?|tues?(day)?|wed(nesday)?|thur?s?(day)?|fri(day)?|sat(urday)?|sun(day)?)\b/.source,
+    /\b\d{1,2}\/\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b/.source,
+    /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b/.source,
+    /\bnext \w+ days?\b|\bnext week\b|\bweekends?\b|\bweekdays?\b/.source,
+  ].join('|'),
+)
+const POSSESSIVE_DAY =
+  /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)'s\b/
+
+export interface ScheduleTarget {
+  /** Planned days the question is about. Empty when it named days the plan lacks. */
+  dates: string[]
+  periods: PeriodName[]
+}
+
+/**
+ * Is this question an edit to the week's plan, and to which days?
+ *
+ * Deliberately conservative: an ordinary "what should I eat tomorrow?" stays a
+ * recommendation. It takes an edit verb plus either a word about the plan or a
+ * named day — and a soft verb ("make", "more") with a bare day only counts in
+ * the possessive, "make tomorrow's lighter".
+ */
+export function scheduleTarget(
+  text: string,
+  board: Board | null,
+  today = todayISO(),
+): ScheduleTarget | null {
+  if (!board || !board.days.some((day) => day.plan)) return null
+
+  const lower = text
+    .toLowerCase()
+    .replace(/’/g, "'")
+    // "sat fat" is a nutrient, not Saturday.
+    .replace(/\bsat(urated|\.)?\s+fat\b/g, 'saturated-fat')
+
+  const namedDays = DAY_WORD.test(lower)
+  const aboutSchedule = SCHEDULE_WORD.test(lower)
+  const strong = STRONG_EDIT.test(lower)
+  const soft = SOFT_EDIT.test(lower)
+  const isEdit =
+    (aboutSchedule && (strong || soft)) ||
+    (namedDays && (strong || (soft && POSSESSIVE_DAY.test(lower))))
+  if (!isEdit) return null
+
+  const spec = interpret(lower, [], { today })
+  const planned = board.days.filter((day) => day.plan).map((day) => day.date)
+  const dates = namedDays ? planned.filter((date) => spec.dates.includes(date)) : planned
+
+  // A day that is not on the plan is an ordinary question, unless the student
+  // clearly meant the plan — then saying so beats recommending something else.
+  if (dates.length === 0 && !aboutSchedule) return null
+  return { dates, periods: spec.periods }
+}
+
+function changeInstruction(text: string, periods: PeriodName[], profile: StudentProfile): string {
+  const scope = periods.length
+    ? `Only change the ${listSentence(periods.map((period) => period.toLowerCase()))} for this day and keep every other meal exactly as it is.`
+    : 'Keep anything the request does not touch exactly as it is.'
+  return [text.slice(0, 1500), scope, ...profileConstraints(profile)].join(' ')
+}
+
+function dayList(dates: string[]): string {
+  return listSentence(
+    dates.map((date) => {
+      const label = friendlyDate(date)
+      return label === 'Today' || label === 'Tomorrow' ? label.toLowerCase() : label
+    }),
+  )
+}
+
+/* --------------------------------------------------------- recommendations */
 
 /**
  * What is left of the day, floored so a student who has already hit their goal
@@ -112,6 +276,8 @@ export interface AskContext {
   locations: Location[]
   /** Hall to use when the question names none and no favourite is set. */
   fallbackLocationId: string | null
+  /** The week's plan, which a question may ask to change. */
+  board: Board | null
 }
 
 export interface AdvisorStore {
@@ -121,6 +287,9 @@ export interface AdvisorStore {
   latest: AdvisorMessage | null
   ask: (question: string, context: AskContext) => Promise<void>
   alternatives: (message: AdvisorMessage) => Promise<void>
+  /** Save a proposed schedule change; `onApplied` receives the saved plans. */
+  confirmChange: (messageId: string, onApplied: (plans: Plan[]) => void) => Promise<void>
+  declineChange: (messageId: string) => void
   reset: () => void
 }
 
@@ -128,10 +297,90 @@ export function useAdvisor(): AdvisorStore {
   const [messages, setMessages] = useState<AdvisorMessage[]>([])
   const [state, setState] = useState<AdvisorState>('idle')
   const busy = useRef(false)
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   const push = useCallback((message: AdvisorMessage) => {
     setMessages((current) => [...current, message])
   }, [])
+
+  const patchChange = useCallback((messageId: string, patch: Partial<ScheduleChange>) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId && message.change
+          ? { ...message, change: { ...message.change, ...patch } }
+          : message,
+      ),
+    )
+  }, [])
+
+  /** Propose edits to the planned days a question is about. Saves nothing. */
+  const proposeChange = useCallback(
+    async (text: string, target: ScheduleTarget, board: Board, profile: StudentProfile) => {
+      const days = board.days.filter((day) => day.plan && target.dates.includes(day.date))
+      if (days.length === 0) {
+        push(
+          assistantMessage(
+            `That day is not on your plan — it covers ${describeRange(board.days.map((day) => day.date))}. ` +
+              'Plan it under My Meals → This Week first, or ask about a day that is on it.',
+            { error: true, locationName: board.locationName },
+          ),
+        )
+        setState('error')
+        return
+      }
+
+      const instruction = changeInstruction(text, target.periods, profile)
+      const changes: DayChange[] = []
+      const failures: Array<{ date: string; error: unknown }> = []
+
+      await pooled(days, PROPOSAL_CONCURRENCY, async (day) => {
+        const before = day.plan!
+        try {
+          const proposal = await api.proposeRefinement(before.id, instruction)
+          const diff = diffPlan(before.content, proposal.content)
+          if (diff.changed) {
+            changes.push({ date: day.date, locationName: board.locationName, before, proposal, diff })
+          }
+        } catch (error) {
+          failures.push({ date: day.date, error })
+        }
+      })
+      changes.sort((a, b) => a.date.localeCompare(b.date))
+
+      if (changes.length === 0) {
+        push(
+          failures.length
+            ? assistantMessage(describeError(failures[0].error, board.locationName), {
+                error: true,
+                locationName: board.locationName,
+              })
+            : assistantMessage(
+                `Your plan for ${dayList(days.map((day) => day.date))} already fits that — I would not change anything.`,
+                { locationName: board.locationName },
+              ),
+        )
+        setState(failures.length ? 'error' : 'ready')
+        return
+      }
+
+      const skipped = failures.length
+        ? ` I could not rework ${dayList(failures.map((entry) => entry.date))}, so ${failures.length === 1 ? 'it stays' : 'they stay'} as planned.`
+        : ''
+      push(
+        assistantMessage(
+          `Here's what I'd change for ${dayList(changes.map((change) => change.date))}. ` +
+            `Nothing on your schedule moves until you confirm.${skipped}`,
+          {
+            locationName: board.locationName,
+            change: { instruction, days: changes, status: 'pending', error: null },
+          },
+        ),
+      )
+      setState('ready')
+    },
+    [push],
+  )
 
   const ask = useCallback(
     async (question: string, context: AskContext) => {
@@ -149,7 +398,17 @@ export function useAdvisor(): AdvisorStore {
       })
       setState('thinking')
 
-      const { profile, consumed, locations, fallbackLocationId } = context
+      const { profile, consumed, locations, fallbackLocationId, board } = context
+
+      const target = scheduleTarget(text, board)
+      if (target && board) {
+        try {
+          await proposeChange(text, target, board, profile)
+        } finally {
+          busy.current = false
+        }
+        return
+      }
 
       // A hall named in the question wins; then a favourite; then the default.
       const named = matchLocation(text, locations)
@@ -258,7 +517,7 @@ export function useAdvisor(): AdvisorStore {
         busy.current = false
       }
     },
-    [push],
+    [push, proposeChange],
   )
 
   /** Re-roll the open recommendation through the refine endpoint. */
@@ -313,6 +572,52 @@ export function useAdvisor(): AdvisorStore {
     [push],
   )
 
+  const confirmChange = useCallback(
+    async (messageId: string, onApplied: (plans: Plan[]) => void) => {
+      const change = messagesRef.current.find((message) => message.id === messageId)?.change
+      if (!change || change.status !== 'pending' || busy.current) return
+      busy.current = true
+      patchChange(messageId, { status: 'applying', error: null })
+
+      const saved: Plan[] = []
+      const failed: Array<{ date: string; error: unknown }> = []
+      try {
+        await pooled(change.days, PROPOSAL_CONCURRENCY, async (day) => {
+          try {
+            saved.push(await api.applyProposal(day.proposal))
+          } catch (error) {
+            failed.push({ date: day.date, error })
+          }
+        })
+        if (saved.length) onApplied(saved)
+
+        if (failed.length === 0) {
+          patchChange(messageId, { status: 'applied', error: null })
+        } else if (saved.length === 0) {
+          // Nothing saved, so the student can try again from the same card.
+          patchChange(messageId, { status: 'pending', error: describeError(failed[0].error, null) })
+        } else {
+          patchChange(messageId, {
+            status: 'applied',
+            error: `${dayList(failed.map((entry) => entry.date))} did not save — ${describeError(failed[0].error, null)}`,
+          })
+        }
+      } finally {
+        busy.current = false
+      }
+    },
+    [patchChange],
+  )
+
+  const declineChange = useCallback(
+    (messageId: string) => {
+      const change = messagesRef.current.find((message) => message.id === messageId)?.change
+      if (change?.status !== 'pending') return
+      patchChange(messageId, { status: 'declined', error: null })
+    },
+    [patchChange],
+  )
+
   const reset = useCallback(() => {
     setMessages([])
     setState('idle')
@@ -324,8 +629,8 @@ export function useAdvisor(): AdvisorStore {
   )
 
   return useMemo(
-    () => ({ messages, state, latest, ask, alternatives, reset }),
-    [messages, state, latest, ask, alternatives, reset],
+    () => ({ messages, state, latest, ask, alternatives, confirmChange, declineChange, reset }),
+    [messages, state, latest, ask, alternatives, confirmChange, declineChange, reset],
   )
 }
 
@@ -394,7 +699,7 @@ function describeError(error: unknown, locationName: string | null): string {
       return `${locationName ?? 'That hall'} has not published a menu for this meal yet. Try the Dining tab for somewhere that is open.`
     }
     if (error.status === 503) {
-      return 'Refinement needs a Gemini key on the backend. Plans still work — set GEMINI_API_KEY to talk them into shape.'
+      return 'Changing a plan needs a Gemini key on the backend. Plans still work — set GEMINI_API_KEY to talk them into shape.'
     }
     return error.message
   }

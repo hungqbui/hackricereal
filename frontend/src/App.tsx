@@ -55,7 +55,7 @@ function UniBite() {
   const log = useMealLog(user?.id ?? null)
   const advisor = useAdvisor()
   const dining = useDining(locations, loadError)
-  const { board, busy, generate, refine, clear } = usePlanBoard(user?.id ?? null)
+  const { board, busy, generate, refine, replacePlans, clear } = usePlanBoard(user?.id ?? null)
 
   useEffect(() => {
     api
@@ -84,9 +84,21 @@ function UniBite() {
         consumed,
         locations,
         fallbackLocationId: defaultLocationId(locations),
+        board,
       })
     },
-    [advisor, profile, consumed, locations],
+    [advisor, profile, consumed, locations, board],
+  )
+
+  /** A confirmed Advisor change lands on the week board as well as the server. */
+  const onConfirmChange = useCallback(
+    (messageId: string) => void advisor.confirmChange(messageId, replacePlans),
+    [advisor, replacePlans],
+  )
+
+  const onDeclineChange = useCallback(
+    (messageId: string) => advisor.declineChange(messageId),
+    [advisor],
   )
 
   /** Plans already written into the log, so the button can read "Added". */
@@ -191,6 +203,9 @@ function UniBite() {
           onAsk={onAsk}
           onLogPlan={onLogPlan}
           loggedPlanIds={loggedPlanIds}
+          board={board}
+          onConfirmChange={onConfirmChange}
+          onDeclineChange={onDeclineChange}
         />
       )}
 

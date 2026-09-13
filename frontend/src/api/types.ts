@@ -19,7 +19,7 @@ export type MacroField =
   | 'sugar_g'
   | 'sodium_mg'
 
-/** The users table stores only credentials: no name, targets or dietary notes. */
+/** Credentials only; goals and preferences live on `/profile`. */
 export interface User {
   id: string
   email: string
@@ -127,6 +127,33 @@ export interface Plan {
   updated_at: string
   revisions: Revision[]
 }
+
+/** A refinement the backend ran but did not save. `POST /plans/{id}/apply` keeps it. */
+export interface PlanProposal {
+  plan_id: string
+  /** The plan revision this was made against; applying fails once the plan moves on. */
+  base_revision: number
+  instruction: string
+  tool_used: 'rewrite_meal_plan' | 'adjust_meal_items'
+  rationale: string | null
+  model: string | null
+  content: PlanContent
+}
+
+export interface ProfileOut {
+  display_name: string | null
+  calorie_goal: number
+  protein_goal: number
+  diet: string
+  allergies: string[]
+  avoid: string[]
+  favorite_location_ids: string[]
+  schedule: Record<string, string>
+  /** `null` until the first save. */
+  updated_at: string | null
+}
+
+export type ProfileUpdate = Partial<Omit<ProfileOut, 'updated_at'>>
 
 export interface PlanGenerateRequest {
   location_id: string

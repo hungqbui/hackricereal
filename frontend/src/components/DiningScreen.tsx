@@ -412,6 +412,12 @@ function HallMenu({
           <SkeletonRow />
           <SkeletonRow />
         </div>
+      ) : menu?.closed ? (
+        /* Upstream still lists the period on a day the hall is shut, so this
+           has to be checked before "nothing matches" would claim it. */
+        <EmptyState icon={IconClock} title="Closed this day">
+          {hall.name} is not serving on {date}.
+        </EmptyState>
       ) : periods && periods.length === 0 ? (
         <EmptyState icon={IconClock} title="No menu published for today">
           {hall.name} has not posted anything for {date}. Menus usually appear a couple of weeks

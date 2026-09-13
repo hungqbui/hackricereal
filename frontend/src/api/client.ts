@@ -5,7 +5,10 @@ import type {
   PeriodsOut,
   Plan,
   PlanGenerateRequest,
+  PlanProposal,
   PlanSummary,
+  ProfileOut,
+  ProfileUpdate,
   TokenOut,
   User,
 } from './types'
@@ -105,6 +108,12 @@ export const api = {
 
   me: () => request<User>('/auth/me'),
 
+  profile: () => request<ProfileOut>('/profile'),
+
+  /** Partial: only the fields sent are changed. */
+  updateProfile: (body: ProfileUpdate) =>
+    request<ProfileOut>('/profile', { method: 'PUT', body }),
+
   locations: () => request<Location[]>('/dining/locations'),
 
   periods: (locationId: string, date: string) =>
@@ -142,6 +151,27 @@ export const api = {
       method: 'POST',
       body: { instruction },
       signal,
+    }),
+
+  /** Run a refinement without saving it, so the change can be reviewed first. */
+  proposeRefinement: (planId: string, instruction: string, signal?: AbortSignal) =>
+    request<PlanProposal>(`/plans/${planId}/propose`, {
+      method: 'POST',
+      body: { instruction },
+      signal,
+    }),
+
+  /** Save a reviewed proposal. The server re-resolves every item and macro. */
+  applyProposal: (proposal: PlanProposal) =>
+    request<Plan>(`/plans/${proposal.plan_id}/apply`, {
+      method: 'POST',
+      body: {
+        instruction: proposal.instruction,
+        base_revision: proposal.base_revision,
+        tool_used: proposal.tool_used,
+        rationale: proposal.rationale,
+        content: proposal.content,
+      },
     }),
 
   getPlan: (planId: string) => request<Plan>(`/plans/${planId}`),
