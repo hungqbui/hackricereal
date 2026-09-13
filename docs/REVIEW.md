@@ -14,6 +14,64 @@ Nothing in part 2 can break part 1. If you only have ten minutes, read
 
 ---
 
+## 0. The mockups this was built against
+
+In [`docs/mockups/`](mockups/). **Read this section before judging the UI
+against them** — they are two different rounds, and only one is current.
+
+### `unibite-screens.png` — the target
+
+![The UniBite mockup](mockups/unibite-screens.png)
+
+**This is the authoritative one.** UniBite branding, four tabs (Advisor,
+Dining, My Meals, Profile), and the copy the build actually uses — "Here's your
+dining snapshot for today", "Cougar Woods is serving dinner until 9 PM", the
+four quick-suggestion chips. Part 2 targets this and
+`unibite-design-tokens.json`.
+
+### The earlier round — superseded, kept for context
+
+<details>
+<summary><code>early-showcase.png</code>, <code>early-user-flow.png</code>, <code>early-design-system.png</code></summary>
+
+![Early showcase](mockups/early-showcase.png)
+![Early user flow](mockups/early-user-flow.png)
+![Early design system](mockups/early-design-system.png)
+
+</details>
+
+These predate the rename and **differ from the shipped design on purpose**. If
+you compare the build to them you will find mismatches that are not bugs:
+
+| | early round | shipped |
+|---|---|---|
+| Product name | Campus Dining Advisor | UniBite |
+| Tabs | 3 — no Profile | 4 |
+| Primary green | `#2E7D32` | `#1F5D46` |
+| Page background | white / `#F9FAFB` | `#FAF9F5` |
+
+`early-design-system.png` is the most misleading of the three: its palette,
+type scale and spacing grid are **not** what shipped.
+`unibite-design-tokens.json` is the source of truth, and `styles.css` adopts it
+verbatim by remapping the existing token names.
+
+`early-user-flow.png` is still worth a look — its eight steps are the product
+thesis (set goals → ask → recommend → log → the log changes the next
+recommendation), and that loop is intact even though the screens moved on.
+
+### Where the build deliberately departs from the mockup
+
+Both rounds show **a food photograph on every card**. DineOnCampus publishes
+none for UH — `useMenuImages: false` and `locationMenuImages: []` on every
+location. The options were stock photos that would confidently show the wrong
+dish, or illustrated glyphs. Glyphs won; see `DECISIONS.md` §4.
+
+Both also show a weekly/monthly planner nowhere, yet the repo had a working
+one. It moved into My Meals → This Week rather than being deleted; `DECISIONS.md`
+§1.
+
+---
+
 ## 1. The nutrition bug (read this part)
 
 ### What was wrong
@@ -169,11 +227,10 @@ worth knowing before you read the diff:
   I eat now?" resolved to the hall **What It Do BBQ** — "what" is distinctive
   in that name and scored exactly at the threshold. The planner never hit this
   because it receives phrases like "3 days at Moody Towers", not questions.
-- **Illustrated glyphs, not food photos.** DineOnCampus publishes no item
-  imagery for UH (`useMenuImages: false`, `locationMenuImages: []` on every
-  location). Glyphs match on item name first, menu category second, because
-  DineOnCampus categories are station names ("Nook", "Bold Bistro") as often as
-  food types.
+- **Illustrated glyphs, not food photos** — see
+  [part 0](#where-the-build-deliberately-departs-from-the-mockup). Glyphs match
+  on item name first, menu category second, because DineOnCampus categories are
+  station names ("Nook", "Bold Bistro") as often as food types.
 
 ---
 
