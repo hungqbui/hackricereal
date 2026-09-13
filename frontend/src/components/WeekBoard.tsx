@@ -1,8 +1,12 @@
+import { useRef } from 'react'
+
 import type { Meal } from '../api/types'
 import { macroValue } from '../lib/format'
 import { PERIOD_ORDER } from '../lib/parse'
 import { monthDayLabel, todayISO, weekdayLabel } from '../lib/dates'
-import { CalorieMeter } from './Macros'
+import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
+import { FitRing, MacroLine } from './Macros'
+import { IconMore, IconWarn, periodIcon } from './icons'
 import type { Board, DayCell } from '../state/board'
 
 const MAX_PREVIEW_ITEMS = 3
@@ -21,10 +25,23 @@ function sortMeals(meals: Meal[]): Meal[] {
 function MealCard({ meal }: { meal: Meal }) {
   const preview = meal.items.slice(0, MAX_PREVIEW_ITEMS)
   const hidden = meal.items.length - preview.length
+  const period = meal.period_name ?? 'Meal'
+  const Icon = periodIcon(meal.period_name)
 
   return (
     <div className="meal-card">
-      <p className="meal-card-period">{meal.period_name ?? 'Meal'}</p>
+      <div className="meal-card-head">
+        <span className="meal-card-glyph" title={period}>
+          <Icon size={16} label={period} />
+        </span>
+        <span className="meal-card-period">{period}</span>
+        {meal.items.length > 0 && (
+          <span className="meal-card-kcal" title="Calories">
+            {macroValue(meal.totals.calories, 'calories')}
+          </span>
+        )}
+      </div>
+
       {meal.items.length === 0 ? (
         <p className="meal-card-empty">{meal.notes ?? 'Nothing planned.'}</p>
       ) : (
@@ -35,17 +52,23 @@ function MealCard({ meal }: { meal: Meal }) {
             {preview.map((item, index) => (
               <li key={`${item.item_id ?? 'item'}-${index}`}>
                 <span className="meal-card-item-name">{item.name ?? 'Item'}</span>
-                <span className="meal-card-item-cal">
-                  {macroValue((item.calories ?? 0) * item.servings, 'calories')}
-                </span>
+                {item.servings !== 1 && (
+                  <span className="meal-card-item-servings">×{item.servings}</span>
+                )}
               </li>
             ))}
           </ul>
-          {hidden > 0 && <p className="meal-card-more">+{hidden} more</p>}
-          <p className="meal-card-totals">
-            {macroValue(meal.totals.calories, 'calories')} cal ·{' '}
-            {macroValue(meal.totals.protein_g, 'protein_g')} protein
-          </p>
+          {hidden > 0 && (
+            <p className="meal-card-more" title={`${hidden} more item${hidden === 1 ? '' : 's'}`}>
+              <IconMore size={14} />
+              {hidden}
+            </p>
+          )}
+          <MacroLine
+            className="meal-card-totals"
+            calories={meal.totals.calories}
+            protein={meal.totals.protein_g}
+          />
         </>
       )}
     </div>
@@ -63,37 +86,62 @@ function DayColumn({
   calorieTarget: number | undefined
   onSelect: (date: string) => void
 }) {
+  const scope = useRef<HTMLElement>(null)
   const today = todayISO()
+  const isToday = day.date === today
   const totals = day.plan?.content.totals
   const meals = day.plan ? sortMeals(day.plan.content.meals) : []
+  const busy = day.status === 'loading' || day.status === 'queued' || day.refining
+
+  // Meals arrive as each day resolves, so stagger them in on the transition
+  // into `ready` rather than once on mount.
+  useGSAP(
+    () => {
+      if (day.status !== 'ready' || meals.length === 0) return
+      gsap.from('.meal-card-button', {
+        opacity: 0,
+        y: 10,
+        duration: DUR.base,
+        ease: EASE.out,
+        stagger: STAGGER.each,
+      })
+    },
+    { scope, dependencies: [day.status, meals.length] },
+  )
 
   return (
-    <article className={`day-column${selected ? ' selected' : ''}`}>
+    <article
+      ref={scope}
+      className={`day-column${selected ? ' selected' : ''}${isToday ? ' today' : ''}`}
+      data-day-column
+    >
       <button
         type="button"
         className="day-header"
         onClick={() => onSelect(day.date)}
         disabled={!day.plan}
+        title={day.plan ? `Open ${weekdayLabel(day.date)}` : undefined}
       >
-        <span className="day-header-top">
+        <span className="day-header-text">
           <span className="day-weekday">
-            {day.date === today ? 'Today' : weekdayLabel(day.date)}
+            {isToday ? 'Today' : weekdayLabel(day.date)}
           </span>
           <span className="day-date">{monthDayLabel(day.date)}</span>
         </span>
         {day.plan && (
           <>
-            <span className="day-totals">
-              {macroValue(totals?.calories, 'calories')} cal ·{' '}
-              {macroValue(totals?.protein_g, 'protein_g')} protein
-            </span>
-            <CalorieMeter actual={totals?.calories} target={calorieTarget} />
+            <MacroLine
+              className="day-totals"
+              calories={totals?.calories}
+              protein={totals?.protein_g}
+            />
+            <FitRing actual={totals?.calories} target={calorieTarget} />
           </>
         )}
       </button>
 
       <div className="day-body">
-        {day.status === 'loading' || day.status === 'queued' || day.refining ? (
+        {busy ? (
           <div className="day-placeholder">
             <span className="spinner" aria-hidden="true" />
             {day.refining ? 'Refining…' : day.status === 'queued' ? 'Queued' : 'Planning…'}
@@ -110,7 +158,12 @@ function DayColumn({
                 <MealCard meal={meal} />
               </button>
             ))}
-            {day.message && <p className="day-note warn">{day.message}</p>}
+            {day.message && (
+              <p className="day-note warn">
+                <IconWarn size={14} />
+                {day.message}
+              </p>
+            )}
           </>
         ) : (
           <div className={`day-placeholder ${day.status}`}>
@@ -131,8 +184,25 @@ export function WeekBoard({
   selectedDate: string | null
   onSelect: (date: string) => void
 }) {
+  const scope = useRef<HTMLElement>(null)
+
+  // Deal the columns in when a new board appears. Keyed on the board's
+  // identity, not its contents, so a refinement does not re-deal the week.
+  useGSAP(
+    () => {
+      gsap.from('[data-day-column]', {
+        opacity: 0,
+        y: 18,
+        duration: DUR.base,
+        ease: EASE.out,
+        stagger: STAGGER.each,
+      })
+    },
+    { scope, dependencies: [board.locationId, board.days.length, board.days[0]?.date] },
+  )
+
   return (
-    <section className="board" aria-label="Meal plan calendar">
+    <section className="board" aria-label="Meal plan calendar" ref={scope}>
       {/* A one- or two-day plan should not stretch a column across the
           whole page the way a full week fills it. */}
       <div className={board.days.length <= 3 ? 'board-scroll sparse' : 'board-scroll'}>

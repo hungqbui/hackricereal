@@ -1,39 +1,43 @@
 /* CougarGrub — one calm surface, one accent, everything else quiet. */
 
 :root {
-  --bg: #f7f6f4;
-  --surface: #ffffff;
-  --surface-2: #f2f0ed;
-  --ink: #1b1a18;
-  --ink-2: #57534e;
-  --ink-3: #8a837c;
-  --line: #e3dfd9;
-  --accent: #c8102e;
-  --accent-soft: #fdeef0;
-  --on: #2f7d52;
+  /* Warm, low-chroma ground so the terracotta accent can stay quiet. */
+  --bg: #f0eee6;
+  --surface: #faf9f5;
+  --surface-2: #e9e6dc;
+  --ink: #2e2b25;
+  --ink-2: #5d574c;
+  --ink-3: #8b8478;
+  --line: #ddd8cb;
+  --accent: #c15f3c;
+  --accent-strong: #a34d2f;
+  --accent-soft: #f6e7de;
+  --on: #5b7f52;
   --near: #b07407;
   --off: #b23b3b;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 1px 2px rgb(28 25 23 / 6%), 0 8px 24px rgb(28 25 23 / 6%);
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 1px 2px rgb(46 43 37 / 5%), 0 10px 28px rgb(46 43 37 / 7%);
+  --font-display: 'Caprasimo', ui-serif, Georgia, serif;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17161a;
-    --surface: #201f24;
-    --surface-2: #27262c;
-    --ink: #f1efec;
-    --ink-2: #b9b4ae;
-    --ink-3: #8b857e;
-    --line: #33313a;
-    --accent: #ff5a70;
-    --accent-soft: #38222a;
-    --on: #64c48e;
+    --bg: #211f1a;
+    --surface: #2b2822;
+    --surface-2: #34302a;
+    --ink: #f2efe7;
+    --ink-2: #bdb6a8;
+    --ink-3: #8d8779;
+    --line: #413c34;
+    --accent: #e08159;
+    --accent-strong: #f0a180;
+    --accent-soft: #3b2a22;
+    --on: #8fb583;
     --near: #d9a441;
     --off: #ff7b7b;
-    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 28%);
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 28px rgb(0 0 0 / 30%);
     color-scheme: dark;
   }
 }
@@ -52,8 +56,8 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.5 ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+  font: 15px/1.5 'Figtree', ui-sans-serif, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -80,6 +84,9 @@ code {
 /* ----------------------------------------------------------- primitives */
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
@@ -91,13 +98,18 @@ code {
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.button:hover:not(:disabled) {
+/* Primaries are excluded: this rule outranks `.button.primary`, so without
+   the guard a hovered primary keeps its white text on a light tan
+   background (1.25:1) and disappears under the cursor. */
+.button:hover:not(:disabled):not(.primary) {
   background: var(--surface-2);
 }
 
 .button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  /* accent-strong, not accent: white on the lighter accent measures 4.23:1,
+     just under the 4.5:1 that 15px button text needs. */
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: #fff;
 }
 
@@ -110,8 +122,17 @@ code {
 }
 
 .button:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* A half-opacity accent puts white text on pale peach (~1.9:1), which is
+   unreadable. Disabled primaries drop the accent entirely instead. */
+.button.primary:disabled {
+  opacity: 1;
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink-2);
 }
 
 .icon-button {
@@ -193,6 +214,9 @@ select:focus {
 }
 
 .banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   background: var(--accent-soft);
   color: var(--ink-2);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
@@ -310,9 +334,10 @@ select:focus {
 }
 
 .brand {
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  font-size: 17px;
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  font-size: 21px;
 }
 
 .brand span {
@@ -325,7 +350,8 @@ select:focus {
 
 .topbar-context {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 7px;
   margin-left: auto;
   text-align: right;
   font-size: 13px;
@@ -556,15 +582,15 @@ select:focus {
 .board-scroll {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(210px, 1fr);
-  gap: 12px;
+  grid-auto-columns: minmax(228px, 1fr);
+  gap: 14px;
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding: 4px 2px 10px;
   scroll-snap-type: x proximity;
 }
 
 .board-scroll.sparse {
-  grid-auto-columns: minmax(210px, 320px);
+  grid-auto-columns: minmax(228px, 340px);
   justify-content: start;
 }
 
@@ -576,11 +602,29 @@ select:focus {
   flex-direction: column;
   overflow: hidden;
   scroll-snap-align: start;
-  transition: border-color 0.12s ease;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.day-column:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
 }
 
 .day-column.selected {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Today gets a marker rather than a word. */
+.day-column.today .day-weekday::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 
 .day-header {
@@ -588,10 +632,12 @@ select:focus {
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
   text-align: left;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  padding: 12px 13px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'text ring' 'totals ring';
+  align-items: center;
+  gap: 2px 10px;
   cursor: pointer;
   font: inherit;
   color: inherit;
@@ -601,20 +647,93 @@ select:focus {
   cursor: default;
 }
 
-.day-header-top {
+.day-header-text {
+  grid-area: text;
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
 }
 
 .day-weekday {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
 }
 
-.day-date,
-.day-totals {
+.day-date {
   font-size: 12px;
   color: var(--ink-3);
+}
+
+.day-totals {
+  grid-area: totals;
+}
+
+/* ----------------------------------------------------- macro icon pairs */
+
+.macro-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.macro-line-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.macro-line-part svg {
+  color: var(--ink-3);
+  flex: none;
+}
+
+/* ------------------------------------------------------------- fit ring */
+
+.fit-ring {
+  grid-area: ring;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.fit-ring svg {
+  display: block;
+}
+
+.fit-ring-track {
+  stroke: var(--line);
+}
+
+.fit-ring-arc {
+  stroke: currentColor;
+}
+
+.fit-ring-glyph {
+  position: absolute;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+
+.fit-ring.tone-on {
+  color: var(--on);
+  background: none;
+}
+
+.fit-ring.tone-near {
+  color: var(--near);
+  background: none;
+}
+
+.fit-ring.tone-off {
+  color: var(--off);
+  background: none;
 }
 
 .calorie-meter {
@@ -661,25 +780,55 @@ select:focus {
   text-align: left;
   cursor: pointer;
   flex: 1;
+  transition: background 0.14s ease;
 }
 
 .meal-card-button:hover {
-  background: var(--surface-2);
+  background: var(--accent-soft);
 }
 
 .meal-card {
-  padding: 10px 12px;
+  padding: 11px 13px 10px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
+}
+
+.meal-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.meal-card-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
 }
 
 .meal-card-period {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--ink-3);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meal-card-kcal {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  flex: none;
 }
 
 .meal-card-items {
@@ -695,7 +844,7 @@ select:focus {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font-size: 13px;
+  font-size: 13.5px;
 }
 
 .meal-card-item-name {
@@ -705,9 +854,22 @@ select:focus {
   white-space: nowrap;
 }
 
-.meal-card-item-cal,
-.meal-card-more,
-.meal-card-totals,
+.meal-card-item-servings {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  flex: none;
+}
+
+.meal-card-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+
 .meal-card-empty {
   font-size: 11.5px;
   color: var(--ink-3);
@@ -715,16 +877,20 @@ select:focus {
 
 .meal-card-totals {
   margin-top: 2px;
-  padding-top: 5px;
+  padding-top: 6px;
   border-top: 1px dashed var(--line);
+  font-size: 12px;
 }
 
 .day-placeholder {
   background: var(--surface);
-  padding: 16px 12px;
+  padding: 16px 13px;
   font-size: 12.5px;
   color: var(--ink-3);
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .day-placeholder.error {
@@ -732,10 +898,18 @@ select:focus {
 }
 
 .day-note.warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
   background: var(--surface);
   color: var(--near);
   font-size: 12px;
-  padding: 8px 12px;
+  padding: 8px 13px;
+}
+
+.day-note.warn svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 /* -------------------------------------------------------------- detail */
@@ -775,6 +949,10 @@ select:focus {
 }
 
 .detail-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: var(--ink-3);
   margin-bottom: 3px;
@@ -805,18 +983,28 @@ select:focus {
 }
 
 .macro-pill {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  min-width: 74px;
+  border-radius: 999px;
+  padding: 6px 12px;
 }
 
 .macro-pill-value {
   font-weight: 600;
   font-size: 14px;
+}
+
+.macro-pill-icon {
+  color: var(--ink-3);
+  flex: none;
+}
+
+.target-fit-icon {
+  color: var(--ink-3);
+  flex: none;
 }
 
 .macro-pill-label {
@@ -888,8 +1076,8 @@ select:focus {
 
 .meal-section-header {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 9px;
   margin-bottom: 8px;
 }
 
@@ -972,9 +1160,12 @@ select:focus {
 }
 
 .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10.5px;
-  border-radius: 4px;
-  padding: 1px 6px;
+  border-radius: 999px;
+  padding: 2px 8px;
   border: 1px solid var(--line);
   color: var(--ink-3);
 }
@@ -997,6 +1188,9 @@ select:focus {
 }
 
 .item-macro-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--ink-3);
   white-space: nowrap;
@@ -1010,6 +1204,9 @@ select:focus {
 }
 
 .detail-notes h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1164,4 +1361,94 @@ select:focus {
   .detail {
     width: 100vw;
   }
+}
+
+/* ------------------------------------------------ icon-bearing additions */
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+}
+
+.mode-pill.live {
+  background: color-mix(in srgb, var(--on) 14%, transparent);
+  border-color: color-mix(in srgb, var(--on) 34%, transparent);
+  color: var(--on);
+}
+
+.topbar-context > svg {
+  color: var(--ink-3);
+  flex: none;
+}
+
+
+.detail-eyebrow-sep {
+  width: 1px;
+  height: 11px;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+.meal-section-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex: none;
+}
+
+.meal-section-header h3 {
+  flex: 1;
+  min-width: 0;
+}
+
+.meal-section-totals {
+  flex: none;
+}
+
+.item-macro-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.item-macro-part svg {
+  opacity: 0.7;
+  flex: none;
+}
+
+.tag.allergen {
+  color: var(--near);
+  border-color: color-mix(in srgb, var(--near) 30%, var(--line));
+}
+
+.tag svg {
+  flex: none;
+}
+
+.field-label-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.detail-notes h3 svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.detail-notes.warn h3 svg {
+  color: var(--near);
 }

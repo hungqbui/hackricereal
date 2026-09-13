@@ -3,6 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from './api/client'
 import type { Location } from './api/types'
 import { AuthScreen } from './components/AuthScreen'
+import {
+  IconLive,
+  IconOffline,
+  IconPin,
+  IconPlus,
+  IconUser,
+  IconWarn,
+} from './components/icons'
 import { Composer } from './components/Composer'
 import { DayDetail } from './components/DayDetail'
 import { WeekBoard } from './components/WeekBoard'
@@ -95,12 +103,26 @@ function Planner() {
 
         {board && (
           <p className="topbar-context">
+            <IconPin size={14} />
             <strong>{board.locationName}</strong>
             <span>{describeRange(board.days.map((day) => day.date))}</span>
           </p>
         )}
 
         <div className="topbar-actions">
+          {health && (
+            <span
+              className={`mode-pill${health.gemini.configured ? ' live' : ''}`}
+              title={
+                health.gemini.configured
+                  ? `Live menus, planning with ${health.gemini.model}`
+                  : 'No GEMINI_API_KEY: offline planner, refinement disabled'
+              }
+            >
+              {health.gemini.configured ? <IconLive size={14} /> : <IconOffline size={14} />}
+              {health.gemini.configured ? 'Live' : 'Offline'}
+            </span>
+          )}
           {board && (
             <button
               type="button"
@@ -109,8 +131,10 @@ function Planner() {
                 clear()
                 setSelectedDate(null)
               }}
+              title="Start a new plan"
             >
-              New plan
+              <IconPlus size={15} />
+              New
             </button>
           )}
           <button
@@ -118,7 +142,9 @@ function Planner() {
             className="button ghost"
             onClick={() => setProfileOpen((open) => !open)}
             aria-expanded={profileOpen}
+            title={user?.email ?? 'Account'}
           >
+            <IconUser size={15} />
             {user?.email?.split('@')[0] || 'Account'}
           </button>
           {profileOpen && <ProfileMenu onClose={() => setProfileOpen(false)} />}
@@ -127,9 +153,9 @@ function Planner() {
 
       {health && !health.gemini.configured && (
         <p className="banner topbanner">
-          The backend has no <code>GEMINI_API_KEY</code>, so plans come from the
-          deterministic offline planner and refinement is disabled. Menus and
-          macros are still live.
+          <IconWarn size={15} />
+          No <code>GEMINI_API_KEY</code> — plans come from the offline planner
+          and refinement is off. Menus and macros are still live.
         </p>
       )}
 
@@ -160,8 +186,8 @@ function Planner() {
             <h1>Eat well on the meal plan, without reading a menu.</h1>
             <p>
               Describe a day or a week in plain English. CougarGrub reads the
-              live University of Houston dining menus, picks real items that fit
-              your macros, and lets you talk it into something better.
+              live UH dining menus, picks real items that hit your macros, and
+              lets you talk it into something better.
             </p>
           </section>
         )}
