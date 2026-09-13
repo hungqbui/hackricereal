@@ -33,8 +33,9 @@ export function AuthScreen() {
           UniBite
         </p>
         <p className="auth-tagline">
-          Your dining hall, planned better. Say how you want to eat; we build
-          it from what the halls are actually serving.
+          <strong>Eat Smarter. Live Better.</strong>
+          Your personal dining advisor — it knows what you've eaten and what
+          campus is serving right now.
         </p>
 
         <form onSubmit={onSubmit} className="auth-form">

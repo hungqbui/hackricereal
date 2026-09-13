@@ -1,0 +1,53 @@
+{
+  "brand": {
+    "name": "UniBite",
+    "tagline": "Eat Smarter. Live Better.",
+    "descriptor": "Your Personal Dining Advisor"
+  },
+  "colors": {
+    "background": "#FAF9F5",
+    "surface": "#FFFFFF",
+    "surfaceMuted": "#F4F6F1",
+    "primary": "#1F5D46",
+    "primaryHover": "#174937",
+    "primarySoft": "#EAF3EC",
+    "accent": "#7BAA64",
+    "text": "#12211B",
+    "textSecondary": "#66736D",
+    "border": "#E4E8E3",
+    "success": "#4D8B57",
+    "warning": "#B6863A"
+  },
+  "typography": {
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "display": "32px/40px 700",
+    "h1": "24px/32px 700",
+    "h2": "20px/28px 650",
+    "body": "16px/24px 400",
+    "bodyMedium": "15px/22px 500",
+    "caption": "13px/18px 500"
+  },
+  "radii": {
+    "sm": "10px",
+    "md": "16px",
+    "lg": "22px",
+    "pill": "999px"
+  },
+  "spacing": {
+    "xs": "4px",
+    "sm": "8px",
+    "md": "12px",
+    "lg": "16px",
+    "xl": "24px",
+    "2xl": "32px"
+  },
+  "shadows": {
+    "card": "0 1px 2px rgba(18,33,27,.04), 0 8px 24px rgba(18,33,27,.05)",
+    "floating": "0 10px 30px rgba(18,33,27,.10)"
+  },
+  "layout": {
+    "mobilePadding": "16px",
+    "desktopMaxWidth": "1160px",
+    "bottomNavHeight": "72px"
+  }
+}

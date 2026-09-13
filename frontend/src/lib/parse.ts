@@ -258,9 +258,19 @@ function parseTargets(text: string): NutritionTargets {
 
 // Words that appear across many halls and so identify none of them.
 const GENERIC_TOKENS = new Set([
+  // Words that appear in hall names but identify nothing.
   'dining', 'commons', 'hall', 'halls', 'the', 'at', 'of', 'and', 'a',
   'college', 'campus', 'university', 'houston', 'uh', 'cafe', 'market',
   'kitchen', 'food', 'bros', 'co', 'inc',
+  // Conversational words. The Advisor sends whole questions here, and a hall
+  // called "What It Do BBQ" would otherwise be matched by the "what" in
+  // "What should I eat now?". None of these ever name a hall.
+  'what', 'should', 'would', 'could', 'do', 'does', 'did', 'eat', 'eating',
+  'ate', 'now', 'want', 'need', 'today', 'tonight', 'tomorrow', 'something',
+  'anything', 'some', 'any', 'get', 'find', 'give', 'make', 'have', 'like',
+  'best', 'good', 'high', 'low', 'under', 'over', 'about', 'my', 'me', 'is',
+  'are', 'for', 'with', 'from', 'that', 'this', 'help', 'you', 'your',
+  'please', 'recommend', 'suggest', 'options', 'option', 'it',
 ])
 
 function tokenize(value: string): string[] {

@@ -68,18 +68,3 @@ async def login(payload: UserLogin, session: SessionDep) -> TokenOut:
 async def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
 
-
-@router.patch("/me", response_model=UserOut)
-async def update_me(
-    payload: UserProfileUpdate, user: CurrentUser, session: SessionDep
-) -> UserOut:
-    if payload.full_name is not None:
-        user.full_name = payload.full_name
-    if payload.dietary_notes is not None:
-        user.dietary_notes = payload.dietary_notes
-    if payload.targets is not None:
-        user.targets = payload.targets.model_dump(exclude_none=True)
-
-    await session.commit()
-    await session.refresh(user)
-    return UserOut.model_validate(user)

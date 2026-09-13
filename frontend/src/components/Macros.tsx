@@ -25,8 +25,9 @@ export function MacroLine({
   protein,
   className = '',
 }: {
-  calories: number | undefined
-  protein: number | undefined
+  /* `null` is a macro no item published; `macroValue` renders it as "—". */
+  calories: number | null | undefined
+  protein: number | null | undefined
   className?: string
 }) {
   return (
@@ -47,7 +48,7 @@ export function MacroPills({
   totals,
   fields,
 }: {
-  totals: Partial<Record<MacroField, number>>
+  totals: Partial<Record<MacroField, number | null>>
   fields: MacroField[]
 }) {
   const scope = useRef<HTMLDivElement>(null)
@@ -91,7 +92,9 @@ export function FitRing({
   target,
   size = 40,
 }: {
-  actual: number | undefined
+  /* `null` actual = macro not published; `pct` already falls through to null,
+     which `fitTone` renders as the neutral, unfilled ring. */
+  actual: number | null | undefined
   target: number | undefined
   size?: number
 }) {

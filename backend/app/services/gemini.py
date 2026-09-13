@@ -271,7 +271,12 @@ def _target_fit(totals: dict[str, float], targets: dict) -> dict:
     for field, target in (targets or {}).items():
         if target is None or field not in totals:
             continue
-        actual = totals.get(field, 0.0)
+        actual = totals.get(field)
+        # None means no selected item published this macro. There is no honest
+        # delta against a target when the actual is unknown, so report no fit
+        # for it rather than scoring the plan against an assumed zero.
+        if actual is None:
+            continue
         delta = round(actual - float(target), 1)
         pct = round(actual / float(target) * 100, 1) if float(target) else None
         fit[field] = {
