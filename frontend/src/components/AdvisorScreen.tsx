@@ -21,6 +21,7 @@ import type { DayTotals, MealSlot } from '../state/meals'
 import { slotForPeriod } from '../state/meals'
 import type { Hall } from '../state/dining'
 import { preferenceTags, type StudentProfile } from '../state/profile'
+import { PlanDigestCard } from './PlanDigestCard'
 import { ScheduleChangeCard } from './ScheduleChangeCard'
 import {
   IconCalories,
@@ -147,9 +148,6 @@ export function AdvisorScreen({
     onAsk(text)
   }
 
-  const caloriesLeft = Math.max(0, profile.calorieGoal - consumed.calories)
-  const proteinLeft = Math.max(0, profile.proteinGoal - consumed.protein_g)
-
   return (
     <div className={`screen advisor-screen${conversing ? '' : ' idle'}`}>
       {!conversing ? (
@@ -162,61 +160,7 @@ export function AdvisorScreen({
           </header>
 
           {/* On desktop this column becomes the sticky context sidebar. */}
-          <aside className="advisor-aside" aria-label="Today at a glance">
-            <Card className="summary-card" data-stagger>
-              <div className="summary-card-inner">
-                <ProgressRing
-                  value={consumed.calories}
-                  target={profile.calorieGoal}
-                  display={consumed.calories.toLocaleString()}
-                  caption="kcal"
-                  size={96}
-                />
-                <div className="summary-stats">
-                  <div>
-                    <span className="summary-stat-label">
-                      <IconProtein size={15} aria-hidden="true" />
-                      Protein
-                    </span>
-                    <strong>
-                      {consumed.protein_g} <span>/ {profile.proteinGoal}g</span>
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="summary-stat-label">
-                      <IconDining size={15} aria-hidden="true" />
-                      Meals
-                    </span>
-                    <strong>
-                      {consumed.meals} <span>/ 3</span>
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            {contextHall && (
-              <Card tone="soft" className="context-card" data-stagger>
-                <span className="context-icon" aria-hidden="true">
-                  <IconPin size={20} />
-                </span>
-                <div>
-                  <strong>
-                    {contextHall.name} — {contextHall.status.chip.toLowerCase()}.
-                  </strong>
-                  <p>Want me to help you plan your meal?</p>
-                </div>
-              </Card>
-            )}
-
-            {consumed.meals > 0 && (
-              <div data-stagger>
-                <InsightCard icon={IconLeaf} title="You're on track!">
-                  {caloriesLeft} calories and {proteinLeft}g protein left to hit today's goals.
-                </InsightCard>
-              </div>
-            )}
-          </aside>
+          <TodayAside profile={profile} consumed={consumed} contextHall={contextHall} />
 
           <section className="quick-prompts" data-stagger>
             <h2 className="eyebrow">Suggested for you</h2>
@@ -249,12 +193,19 @@ export function AdvisorScreen({
               onAlternatives={() => void advisor.alternatives(message)}
               onConfirmChange={() => onConfirmChange(message.id)}
               onDeclineChange={() => onDeclineChange(message.id)}
+              onAsk={onAsk}
               logged={message.plan ? loggedPlanIds.has(message.plan.id) : false}
               busy={advisor.state === 'thinking'}
             />
           ))}
           {advisor.state === 'thinking' && <TypingBubble />}
         </div>
+      )}
+
+      {/* The sidebar stays beside the conversation; the idle view renders its
+          own copy so the snapshot can stagger it in with the greeting. */}
+      {conversing && (
+        <TodayAside profile={profile} consumed={consumed} contextHall={contextHall} />
       )}
 
       <form
@@ -268,8 +219,12 @@ export function AdvisorScreen({
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder={conversing ? 'Ask a follow up…' : 'Ask about your next meal…'}
-            aria-label="Ask the advisor about your next meal"
+            placeholder={
+              conversing
+                ? 'Ask a follow up, or change a plan…'
+                : 'Ask about a meal, or say “show my plans”…'
+            }
+            aria-label="Ask the advisor about a meal or your plans"
             enterKeyHint="send"
           />
           <button
@@ -301,6 +256,80 @@ export function AdvisorScreen({
   )
 }
 
+/* ---------------------------------------------------------------- sidebar */
+
+/** Today's numbers and where to eat — beside the idle snapshot and the thread. */
+function TodayAside({
+  profile,
+  consumed,
+  contextHall,
+}: {
+  profile: StudentProfile
+  consumed: DayTotals
+  contextHall: Hall | null
+}) {
+  const caloriesLeft = Math.max(0, profile.calorieGoal - consumed.calories)
+  const proteinLeft = Math.max(0, profile.proteinGoal - consumed.protein_g)
+
+  return (
+    <aside className="advisor-aside" aria-label="Today at a glance">
+      <Card className="summary-card" data-stagger>
+        <div className="summary-card-inner">
+          <ProgressRing
+            value={consumed.calories}
+            target={profile.calorieGoal}
+            display={consumed.calories.toLocaleString()}
+            caption="kcal"
+            size={96}
+          />
+          <div className="summary-stats">
+            <div>
+              <span className="summary-stat-label">
+                <IconProtein size={15} aria-hidden="true" />
+                Protein
+              </span>
+              <strong>
+                {consumed.protein_g} <span>/ {profile.proteinGoal}g</span>
+              </strong>
+            </div>
+            <div>
+              <span className="summary-stat-label">
+                <IconDining size={15} aria-hidden="true" />
+                Meals
+              </span>
+              <strong>
+                {consumed.meals} <span>/ 3</span>
+              </strong>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {contextHall && (
+        <Card tone="soft" className="context-card" data-stagger>
+          <span className="context-icon" aria-hidden="true">
+            <IconPin size={20} />
+          </span>
+          <div>
+            <strong>
+              {contextHall.name} — {contextHall.status.chip.toLowerCase()}.
+            </strong>
+            <p>Want me to help you plan your meal?</p>
+          </div>
+        </Card>
+      )}
+
+      {consumed.meals > 0 && (
+        <div data-stagger>
+          <InsightCard icon={IconLeaf} title="You're on track!">
+            {caloriesLeft} calories and {proteinLeft}g protein left to hit today's goals.
+          </InsightCard>
+        </div>
+      )}
+    </aside>
+  )
+}
+
 /* ------------------------------------------------------------------ turns */
 
 function MessageTurn({
@@ -311,6 +340,7 @@ function MessageTurn({
   onAlternatives,
   onConfirmChange,
   onDeclineChange,
+  onAsk,
   logged,
   busy,
 }: {
@@ -321,6 +351,7 @@ function MessageTurn({
   onAlternatives: () => void
   onConfirmChange: () => void
   onDeclineChange: () => void
+  onAsk: (question: string) => void
   logged: boolean
   busy: boolean
 }) {
@@ -350,6 +381,9 @@ function MessageTurn({
             logged={logged}
             busy={busy}
           />
+        )}
+        {message.digest && (
+          <PlanDigestCard digest={message.digest} onAsk={onAsk} busy={busy} />
         )}
         {message.change && (
           <ScheduleChangeCard
@@ -412,11 +446,13 @@ export function MealRecommendationCard({
   const PeriodGlyph = periodIcon(meal?.period_name)
   const slot = slotForPeriod(meal?.period_name)
 
+  // Keyed on the revision too: a confirmed swap keeps the plan id but should
+  // still visibly land in the card.
   useGSAP(
     () => {
       gsap.from(card.current, { y: 16, opacity: 0, duration: DUR.base, ease: EASE.out })
     },
-    { dependencies: [plan.id], scope: card },
+    { dependencies: [plan.id, plan.revision_count], scope: card },
   )
 
   const projectedCalories = consumed.calories + calories

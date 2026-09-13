@@ -53,8 +53,14 @@ function keyed(items: PlannedItem[]): Map<string, PlannedItem> {
   return out
 }
 
+/**
+ * Meals match by period name first. Upstream reissues period ids, so a plan
+ * saved last week and its refinement today can hold different ids for the same
+ * lunch; matching on id would show every item as removed and re-added.
+ */
 function mealKey(meal: Meal): string {
-  return meal.period_id ?? `name:${meal.period_name ?? ''}`
+  const name = (meal.period_name ?? '').toLowerCase().replace(/[^a-z]/g, '')
+  return name ? `name:${name}` : `id:${meal.period_id ?? ''}`
 }
 
 function periodRank(name: string): number {

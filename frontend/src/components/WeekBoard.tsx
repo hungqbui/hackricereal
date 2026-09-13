@@ -6,8 +6,9 @@ import { PERIOD_ORDER } from '../lib/parse'
 import { monthDayLabel, todayISO, weekdayLabel } from '../lib/dates'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
 import { FitRing, MacroLine } from './Macros'
-import { IconCalendarOff, IconMore, IconWarn, periodIcon } from './icons'
+import { IconCalendarOff, IconCheck, IconMore, IconWarn, periodIcon } from './icons'
 import type { Board, DayCell } from '../state/board'
+import { eatenKey } from '../state/meals'
 
 const MAX_PREVIEW_ITEMS = 3
 
@@ -22,19 +23,24 @@ function sortMeals(meals: Meal[]): Meal[] {
   return [...meals].sort((a, b) => periodRank(a.period_name) - periodRank(b.period_name))
 }
 
-function MealCard({ meal }: { meal: Meal }) {
+function MealCard({ meal, eaten }: { meal: Meal; eaten: boolean }) {
   const preview = meal.items.slice(0, MAX_PREVIEW_ITEMS)
   const hidden = meal.items.length - preview.length
   const period = meal.period_name ?? 'Meal'
   const Icon = periodIcon(meal.period_name)
 
   return (
-    <div className="meal-card">
+    <div className={`meal-card${eaten ? ' eaten' : ''}`}>
       <div className="meal-card-head">
         <span className="meal-card-glyph" title={period}>
           <Icon size={16} label={period} />
         </span>
         <span className="meal-card-period">{period}</span>
+        {eaten && (
+          <span className="meal-card-eaten" title="Eaten">
+            <IconCheck size={11} label="Eaten" />
+          </span>
+        )}
         {meal.items.length > 0 && (
           <span className="meal-card-kcal" title="Calories">
             {macroValue(meal.totals.calories, 'calories')}
@@ -80,11 +86,13 @@ function DayColumn({
   selected,
   calorieTarget,
   onSelect,
+  eatenMeals,
 }: {
   day: DayCell
   selected: boolean
   calorieTarget: number | undefined
   onSelect: (date: string) => void
+  eatenMeals: Map<string, string>
 }) {
   const scope = useRef<HTMLElement>(null)
   const today = todayISO()
@@ -162,7 +170,10 @@ function DayColumn({
                 className="meal-card-button"
                 onClick={() => onSelect(day.date)}
               >
-                <MealCard meal={meal} />
+                <MealCard
+                  meal={meal}
+                  eaten={eatenMeals.has(eatenKey(day.plan!.id, meal.period_id))}
+                />
               </button>
             ))}
             {day.message && (
@@ -196,10 +207,12 @@ export function WeekBoard({
   board,
   selectedDate,
   onSelect,
+  eatenMeals,
 }: {
   board: Board
   selectedDate: string | null
   onSelect: (date: string) => void
+  eatenMeals: Map<string, string>
 }) {
   const scope = useRef<HTMLElement>(null)
 
@@ -230,6 +243,7 @@ export function WeekBoard({
             selected={day.date === selectedDate}
             calorieTarget={board.targets.calories}
             onSelect={onSelect}
+            eatenMeals={eatenMeals}
           />
         ))}
       </div>

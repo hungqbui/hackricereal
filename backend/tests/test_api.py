@@ -380,6 +380,83 @@ async def test_generate_surfaces_upstream_failure(api, auth):
 
 
 # ---------------------------------------------------------------------------
+# The week plan
+# ---------------------------------------------------------------------------
+
+
+def _week(board_id="board-1", dates=(DATE_A, DATE_B)):
+    return {"id": board_id, "query": "high protein", "periods": [], "dates": list(dates)}
+
+
+async def _generate_week(api, headers, board, dates):
+    for date in dates:
+        resp = await api.post(
+            "/plans/generate", headers=headers, json={**GENERATE, "date": date, "board": board}
+        )
+        assert resp.status_code == 201, resp.text
+
+
+async def test_week_plan_is_saved_and_restored(api, auth):
+    headers, _ = auth
+    assert (await api.get("/plans/week", headers=headers)).json() is None
+
+    # Days finish out of order; the week still comes back in date order.
+    await _generate_week(api, headers, _week(), [DATE_B, DATE_A])
+
+    week = (await api.get("/plans/week", headers=headers)).json()
+    assert week["board_id"] == "board-1"
+    assert week["location_id"] == MOODY
+    assert week["query"] == "high protein"
+    assert week["dates"] == [DATE_A, DATE_B]
+    assert [plan["plan_date"] for plan in week["plans"]] == [DATE_A, DATE_B]
+    assert all(plan["sources"]["kind"] == "week" for plan in week["plans"])
+
+
+async def test_a_recommendation_is_not_a_week_plan(api, auth):
+    headers, _ = auth
+    plan = (await api.post("/plans/generate", headers=headers, json=GENERATE)).json()
+
+    assert plan["sources"]["kind"] == "meal"
+    assert (await api.get("/plans/week", headers=headers)).json() is None
+
+
+async def test_newest_week_wins_and_clearing_does_not_resurrect_an_older_one(api, auth):
+    headers, _ = auth
+    await _generate_week(api, headers, _week("board-1", [DATE_A]), [DATE_A])
+    await _generate_week(api, headers, _week("board-2", [DATE_B]), [DATE_B])
+    assert (await api.get("/plans/week", headers=headers)).json()["board_id"] == "board-2"
+
+    assert (await api.delete("/plans/week/board-2", headers=headers)).status_code == 204
+    assert (await api.get("/plans/week", headers=headers)).json() is None
+    # The plans themselves are kept.
+    assert len((await api.get("/plans", headers=headers)).json()) == 2
+
+
+async def test_week_plans_are_per_user(api, auth):
+    headers, _ = auth
+    await _generate_week(api, headers, _week(), [DATE_A])
+
+    other = await api.post(
+        "/auth/register", json={"email": "other@uh.edu", "password": "password123"}
+    )
+    other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+
+    assert (await api.get("/plans/week", headers=other_headers)).json() is None
+    assert (await api.delete("/plans/week/board-1", headers=other_headers)).status_code == 204
+    assert (await api.get("/plans/week", headers=headers)).json()["board_id"] == "board-1"
+
+
+async def test_board_ids_are_validated(api, auth):
+    headers, _ = auth
+    resp = await api.post(
+        "/plans/generate",
+        headers=headers,
+        json={**GENERATE, "board": {**_week(), "id": "not/a valid id"}},
+    )
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # Listing, isolation, deletion
 # ---------------------------------------------------------------------------
 

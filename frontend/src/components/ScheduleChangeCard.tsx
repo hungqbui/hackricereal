@@ -5,8 +5,9 @@
  * slide in, and each day's totals count from the old number to the new one, so
  * the size of the change reads before any text does. Confirming collapses the
  * struck rows away and settles the card; keeping the plan runs the diff
- * backwards and folds it shut. Nothing is saved before "Update my schedule" —
- * see `state/advisor.ts`.
+ * backwards and folds it shut. Nothing is saved before the student confirms —
+ * see `state/changes.ts`, which the chat, the day panel and "See alternatives"
+ * all share.
  *
  * A card that mounts already settled (the student left the tab and came back)
  * is drawn in its final state rather than replayed.
@@ -17,7 +18,7 @@ import { useRef, type MouseEvent, type ReactNode } from 'react'
 import { friendlyDate } from '../lib/dates'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
 import type { ItemChange, MacroShift, MealChange } from '../lib/planDiff'
-import type { DayChange, ScheduleChange } from '../state/advisor'
+import type { DayChange, ScheduleChange } from '../state/changes'
 import {
   IconCalendar,
   IconCalories,
@@ -219,16 +220,16 @@ export function ScheduleChangeCard({
   const collapsed = settledOnMount && status === 'declined'
   const hideRemoved = settledOnMount && status === 'applied'
   const days = change.days.map((day) => friendlyDate(day.date))
+  const meal = change.kind === 'meal'
+  const labels = meal
+    ? { pending: 'Another option', applied: 'Swapped in', declined: 'Kept the original' }
+    : { pending: 'Proposed plan change', applied: 'Plan updated', declined: 'Change not applied' }
 
   return (
     <div className={`change-card ${status}`} ref={root}>
       <p className="recommendation-eyebrow">
         <IconCalendar size={14} aria-hidden="true" />
-        {status === 'applied'
-          ? 'Schedule updated'
-          : status === 'declined'
-            ? 'Change not applied'
-            : 'Proposed schedule change'}
+        {status === 'applied' ? labels.applied : status === 'declined' ? labels.declined : labels.pending}
       </p>
 
       {!collapsed && (
@@ -244,13 +245,13 @@ export function ScheduleChangeCard({
           <span className="change-result-icon" aria-hidden="true">
             <IconCheck size={14} />
           </span>
-          Saved to This Week for {days.join(', ')}.
+          {meal ? 'Swapped in — the card above shows it now.' : `Saved your plan for ${days.join(', ')}.`}
         </p>
       )}
 
       {status === 'declined' && (
         <p className="change-result declined" role="status">
-          Kept your current plan for {days.join(', ')}.
+          {meal ? 'Kept the original recommendation.' : `Kept your current plan for ${days.join(', ')}.`}
         </p>
       )}
 
@@ -275,7 +276,7 @@ export function ScheduleChangeCard({
               </>
             ) : (
               <>
-                <IconCheck size={16} /> Update my schedule
+                <IconCheck size={16} /> {meal ? 'Swap it in' : 'Save this change'}
               </>
             )}
           </button>
@@ -285,7 +286,7 @@ export function ScheduleChangeCard({
             disabled={status === 'applying'}
             onClick={(event) => press(event, onDecline)}
           >
-            Keep current plan
+            {meal ? 'Keep the original' : 'Keep current plan'}
           </button>
         </div>
       )}

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-import type { Meal, PlannedItem } from '../api/types'
-import { friendlyDate, weekdayLabel } from '../lib/dates'
+import type { Meal, Plan, PlannedItem } from '../api/types'
+import { friendlyDate, todayISO, weekdayLabel } from '../lib/dates'
+import { eatenKey } from '../state/meals'
 import { MACRO_LABELS, macroValue, servingsLabel } from '../lib/format'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
+import { usePlanReview } from '../state/review'
 import { MacroLine, MacroPills, TargetFit } from './Macros'
+import { ScheduleChangeCard } from './ScheduleChangeCard'
 import {
   IconAllergen,
   IconArrowRight,
@@ -87,12 +90,50 @@ function ItemRow({ item }: { item: PlannedItem }) {
   )
 }
 
-function MealSection({ meal }: { meal: Meal }) {
+function MealSection({
+  meal,
+  date,
+  eaten,
+  onToggleEaten,
+}: {
+  meal: Meal
+  date: string
+  eaten: boolean
+  onToggleEaten: () => void
+}) {
   const period = meal.period_name ?? 'Meal'
   const Icon = periodIcon(meal.period_name)
+  const section = useRef<HTMLElement>(null)
+  const shown = useRef(eaten)
+  const upcoming = date > todayISO()
+
+  // Marking plays forward (check pops, the section washes green); unmarking
+  // plays the check back out. Nothing runs on mount, so opening a day that is
+  // already eaten simply shows it.
+  useGSAP(
+    () => {
+      if (shown.current === eaten) return
+      shown.current = eaten
+      if (eaten) {
+        gsap
+          .timeline()
+          .fromTo('.eaten-check', { scale: 0, rotate: -120 }, { scale: 1, rotate: 0, duration: DUR.slow, ease: EASE.pop })
+          .fromTo(
+            section.current,
+            { backgroundColor: 'rgba(123, 170, 100, 0.3)' },
+            { backgroundColor: 'rgba(123, 170, 100, 0)', duration: DUR.slow * 1.6, ease: EASE.out, clearProps: 'backgroundColor' },
+            '<',
+          )
+          .from('.item-row', { x: -6, duration: DUR.base, ease: EASE.out, stagger: 0.04 }, '<0.1')
+      } else {
+        gsap.fromTo('.eaten-toggle', { scale: 0.94 }, { scale: 1, duration: DUR.base, ease: EASE.pop })
+      }
+    },
+    { scope: section, dependencies: [eaten] },
+  )
 
   return (
-    <section className="meal-section" data-detail-section>
+    <section className={`meal-section${eaten ? ' eaten' : ''}`} data-detail-section ref={section}>
       <header className="meal-section-header">
         <span className="meal-section-glyph" title={period}>
           <Icon size={16} label={period} />
@@ -104,6 +145,29 @@ function MealSection({ meal }: { meal: Meal }) {
           protein={meal.totals.protein_g}
         />
       </header>
+      {meal.items.length > 0 && (
+        <div className="meal-section-actions">
+          <button
+            type="button"
+            className={`eaten-toggle${eaten ? ' on' : ''}`}
+            onClick={onToggleEaten}
+            disabled={upcoming && !eaten}
+            aria-pressed={eaten}
+            title={
+              eaten
+                ? 'Logged in My Meals — press to undo'
+                : upcoming
+                  ? 'You can mark this once the day comes'
+                  : `Log this ${period.toLowerCase()} in My Meals`
+            }
+          >
+            <span className="eaten-check" aria-hidden="true">
+              <IconCheck size={12} />
+            </span>
+            {eaten ? 'Eaten' : 'Mark as eaten'}
+          </button>
+        </div>
+      )}
       {meal.notes && <p className="meal-notes">{meal.notes}</p>}
       {meal.items.length === 0 ? (
         <p className="meal-notes muted">Nothing selected.</p>
@@ -123,12 +187,25 @@ interface DayDetailProps {
   board: Board
   busy: boolean
   onClose: () => void
-  onRefine: (dates: string[], instruction: string) => void
+  /** Plans the student confirmed a change to, for the board to swap in. */
+  onPlansChanged: (plans: Plan[]) => void
+  /** Logged week-plan meals, keyed by `eatenKey(planId, periodId)`. */
+  eatenMeals: Map<string, string>
+  onToggleEaten: (plan: Plan, meal: Meal, locationName: string) => void
 }
 
-export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProps) {
+export function DayDetail({
+  day,
+  board,
+  busy,
+  onClose,
+  onPlansChanged,
+  eatenMeals,
+  onToggleEaten,
+}: DayDetailProps) {
   const [instruction, setInstruction] = useState('')
   const scope = useRef<HTMLDivElement>(null)
+  const review = usePlanReview(onPlansChanged)
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -140,23 +217,31 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
 
   // Panel slides in over a fading scrim; the sections then deal themselves
   // in, so a long plan reads top-to-bottom instead of landing all at once.
+  //
+  // Explicit fromTo end states, not from(): a from-tween takes its destination
+  // from the element's current style, so anything mid-transition (or a tween
+  // StrictMode reverted a frame ago) would become the resting value and leave
+  // the panel half-faded. Inline styles are cleared once each tween lands.
   useGSAP(
     () => {
       const tl = gsap.timeline()
-      tl.from('.scrim', { opacity: 0, duration: DUR.fast, ease: EASE.out })
-        .from(
+      tl.fromTo('.scrim', { opacity: 0 }, { opacity: 1, duration: DUR.fast, ease: EASE.out, clearProps: 'opacity' })
+        .fromTo(
           '.detail',
-          { xPercent: 4, opacity: 0, duration: DUR.base, ease: EASE.out },
+          { xPercent: 4, opacity: 0 },
+          { xPercent: 0, opacity: 1, duration: DUR.base, ease: EASE.out, clearProps: 'opacity,transform' },
           '<',
         )
-        .from(
+        .fromTo(
           '[data-detail-section]',
+          { opacity: 0, y: 12 },
           {
-            opacity: 0,
-            y: 12,
+            opacity: 1,
+            y: 0,
             duration: DUR.base,
             ease: EASE.out,
             stagger: STAGGER.each,
+            clearProps: 'opacity,transform',
           },
           '-=0.2',
         )
@@ -164,18 +249,48 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
     { scope, dependencies: [day.date] },
   )
 
+  // A saved change re-deals the sections so the new plan visibly arrives.
+  const shownRevision = useRef(day.plan?.revision_count ?? 0)
+  useGSAP(
+    () => {
+      const revision = day.plan?.revision_count ?? 0
+      const previous = shownRevision.current
+      shownRevision.current = revision
+      if (revision <= previous) return
+      gsap.fromTo(
+        '[data-detail-section]',
+        { opacity: 0, y: 10 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: DUR.base,
+          ease: EASE.out,
+          stagger: STAGGER.each,
+          clearProps: 'opacity,transform',
+        },
+      )
+    },
+    { scope, dependencies: [day.plan?.revision_count] },
+  )
+
   const plan = day.plan
   if (!plan) return null
   const { content } = plan
   const plannedDates = board.days.filter((entry) => entry.plan).map((entry) => entry.date)
+  const reviewing = review.change?.status === 'pending' || review.change?.status === 'applying'
 
-  function submit(event: FormEvent, dates: string[]) {
+  async function submit(event: FormEvent, dates: string[]) {
     event.preventDefault()
     const text = instruction.trim()
     if (!text) return
-    onRefine(dates, text)
-    setInstruction('')
+    const targets = board.days
+      .filter((entry) => dates.includes(entry.date) && entry.plan)
+      .map((entry) => ({ date: entry.date, locationName: board.locationName, plan: entry.plan! }))
+    // Kept until there is a proposal, so a busy model does not eat the request.
+    if (await review.propose(targets, text)) setInstruction('')
   }
+
+  const disabled = busy || review.proposing || reviewing || !instruction.trim()
 
   return (
     <div ref={scope}>
@@ -216,7 +331,13 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
           <TargetFit fit={content.target_fit} />
 
           {content.meals.map((meal, index) => (
-            <MealSection key={meal.period_id ?? index} meal={meal} />
+            <MealSection
+              key={meal.period_id ?? index}
+              meal={meal}
+              date={day.date}
+              eaten={eatenMeals.has(eatenKey(plan.id, meal.period_id))}
+              onToggleEaten={() => onToggleEaten(plan, meal, board.locationName)}
+            />
           ))}
 
           {content.constraint_notes.length > 0 && (
@@ -272,8 +393,26 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
           )}
         </div>
 
-        <form className="refine" onSubmit={(event) => submit(event, [day.date])}>
+        <form className="refine" onSubmit={(event) => void submit(event, [day.date])}>
           {day.message && <p className="form-error">{day.message}</p>}
+
+          {/* Keyed per proposal, so each new one plays its own arrival. */}
+          {review.change && (
+            <div className="refine-review">
+              <ScheduleChangeCard
+                key={review.change.days.map((change) => change.proposal.plan_id + change.proposal.base_revision).join()}
+                change={review.change}
+                onConfirm={() => void review.confirm()}
+                onDecline={review.decline}
+              />
+            </div>
+          )}
+          {review.notice && (
+            <p className="form-error">
+              <IconWarn size={14} /> {review.notice}
+            </p>
+          )}
+
           <label className="field">
             <span className="field-label-icon">
               <IconChat size={14} />
@@ -290,19 +429,19 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
             <button
               type="submit"
               className="button primary"
-              disabled={busy || !instruction.trim()}
-              title="Apply to this day"
+              disabled={disabled}
+              title="Preview a change to this day"
             >
-              {day.refining ? 'Refining…' : 'This day'}
+              {review.proposing ? 'Working it out…' : 'This day'}
               <IconArrowRight size={15} />
             </button>
             {plannedDates.length > 1 && (
               <button
                 type="button"
                 className="button"
-                disabled={busy || !instruction.trim()}
-                onClick={(event) => submit(event, plannedDates)}
-                title={`Apply to all ${plannedDates.length} planned days`}
+                disabled={disabled}
+                onClick={(event) => void submit(event, plannedDates)}
+                title={`Preview a change to all ${plannedDates.length} planned days`}
               >
                 <IconCalendar size={15} />
                 All {plannedDates.length}
@@ -310,7 +449,8 @@ export function DayDetail({ day, board, busy, onClose, onRefine }: DayDetailProp
             )}
           </div>
           <p className="refine-hint">
-            Macros are recomputed server-side from the real menu.
+            You'll see exactly what changes before anything is saved. Macros are recomputed from the
+            real menu.
           </p>
         </form>
       </aside>

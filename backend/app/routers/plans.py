@@ -1,4 +1,5 @@
 import asyncio
+import re
 import uuid
 from datetime import date as Date
 
@@ -16,6 +17,7 @@ from ..schemas import (
     PlanRefineRequest,
     PlanSummaryOut,
     ProfileOut,
+    WeekOut,
 )
 from ..services import gemini
 from ..services.dineoncampus import DineOnCampusClient, DineOnCampusError
@@ -29,8 +31,13 @@ async def _load_menus(
     location_id: str,
     date: str,
     period_ids: list[str],
+    period_names: dict[str, str] | None = None,
 ) -> tuple[list[dict], str | None, list[str]]:
     """Fetch every requested period's menu concurrently.
+
+    ``period_names`` maps a requested id to the period name it was saved
+    under, so an id upstream has since reissued still resolves. Ids come back
+    in request order, so zipping them with ``period_ids`` gives the remap.
 
     Returns (menus, location_name, period_ids_used).
     """
@@ -50,7 +57,7 @@ async def _load_menus(
         )
 
     if period_ids:
-        unknown = [pid for pid in period_ids if pid not in available]
+        wanted, unknown = _resolve_periods(available, period_ids, period_names or {})
         if unknown:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -59,7 +66,6 @@ async def _load_menus(
                     f"Available: {sorted(available)}"
                 ),
             )
-        wanted = period_ids
     else:
         wanted = list(available)
 
@@ -91,6 +97,54 @@ async def _load_menus(
         )
 
     return menus, location_name, wanted
+
+
+def _period_key(name: str | None) -> str:
+    return re.sub(r"[^a-z]", "", (name or "").lower())
+
+
+def _resolve_periods(
+    available: dict[str, dict],
+    period_ids: list[str],
+    period_names: dict[str, str],
+) -> tuple[list[str], list[str]]:
+    """Match requested ids to served periods. Returns (resolved, unknown).
+
+    DineOnCampus reissues a hall's period ids when it republishes menus, so an
+    id saved with a plan can go stale while the period itself ("Lunch") is
+    still served. Such an id falls back to the name it was saved under; an id
+    with no known name stays unknown.
+    """
+    by_name: dict[str, str] = {}
+    for pid, period in available.items():
+        by_name.setdefault(_period_key(period.get("name")), pid)
+
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for pid in period_ids:
+        if pid in available:
+            resolved.append(pid)
+            continue
+        saved_name = period_names.get(pid)
+        current = by_name.get(_period_key(saved_name)) if saved_name else None
+        if current:
+            resolved.append(current)
+        else:
+            unknown.append(pid)
+    return resolved, unknown
+
+
+def _remap_periods(content: dict, remap: dict[str, str]) -> dict:
+    """A copy of plan content with reissued period ids swapped for current ones."""
+    if not remap:
+        return content
+    return {
+        **content,
+        "meals": [
+            {**meal, "period_id": remap.get(meal.get("period_id"), meal.get("period_id"))}
+            for meal in content.get("meals") or []
+        ],
+    }
 
 
 def _client(request: Request) -> DineOnCampusClient:
@@ -125,8 +179,14 @@ async def _profile_context(
     return targets, gemini.build_profile_notes(profile.model_dump())
 
 
-async def _plan_menus(plan: MealPlan, request: Request) -> tuple[list[dict], str | None]:
-    """The menus a stored plan was drawn from, refetched from upstream."""
+async def _plan_menus(
+    plan: MealPlan, request: Request
+) -> tuple[list[dict], str | None, dict[str, str]]:
+    """The menus a stored plan was drawn from, refetched from upstream.
+
+    Returns (menus, location_name, remap), where remap takes any period id
+    upstream has reissued since the plan was saved to its current id.
+    """
     sources = plan.sources or {}
     location_id = sources.get("location_id")
     if not location_id:
@@ -134,13 +194,21 @@ async def _plan_menus(plan: MealPlan, request: Request) -> tuple[list[dict], str
             status_code=status.HTTP_409_CONFLICT,
             detail="This plan has no source location recorded and cannot be refined.",
         )
-    menus, location_name, _ = await _load_menus(
+    requested = sources.get("period_ids") or []
+    saved_names = {
+        meal["period_id"]: meal.get("period_name")
+        for meal in (plan.content or {}).get("meals") or []
+        if meal.get("period_id") and meal.get("period_name")
+    }
+    menus, location_name, used = await _load_menus(
         _client(request),
         location_id,
         plan.plan_date.isoformat(),
-        sources.get("period_ids") or [],
+        requested,
+        saved_names,
     )
-    return menus, location_name
+    remap = {old: new for old, new in zip(requested, used) if old != new}
+    return menus, location_name, remap
 
 
 async def _propose(
@@ -149,18 +217,20 @@ async def _propose(
     request: Request,
     user: CurrentUser,
     session: SessionDep,
-) -> tuple[dict, str, str, str]:
+) -> tuple[dict, str, str, str, dict[str, str]]:
     """Run a refinement and hydrate it without touching the stored plan.
 
-    Returns (content, tool_used, rationale, model).
+    Returns (content, tool_used, rationale, model, period_remap).
     """
-    menus, location_name = await _plan_menus(plan, request)
+    menus, location_name, remap = await _plan_menus(plan, request)
     # The profile as it is now, so an allergy added since generation applies.
     _, dietary_notes = await _profile_context(user, session)
 
     try:
         selection, tool_used, rationale, model_used = await gemini.refine_selection(
-            current=plan.content,
+            # The model must see the ids on today's menu, or its edits would
+            # land in a duplicate meal under the stale id.
+            current=_remap_periods(plan.content, remap),
             menus=menus,
             instruction=instruction,
             targets=plan.targets or {},
@@ -182,7 +252,7 @@ async def _propose(
 
     catalog = gemini.build_catalog(menus)
     content = gemini.hydrate_plan(selection, catalog, menus, plan.targets or {})
-    return content, tool_used, rationale, model_used
+    return content, tool_used, rationale, model_used, remap
 
 
 async def _record_revision(
@@ -194,11 +264,19 @@ async def _record_revision(
     tool_used: str,
     rationale: str | None,
     model: str | None,
+    period_remap: dict[str, str] | None = None,
 ) -> PlanOut:
     plan.content = content
     plan.title = content.get("title") or plan.title
     plan.model = model
     plan.revision_count += 1
+    if period_remap:
+        # Store the current ids so the next refinement need not resolve again.
+        sources = plan.sources or {}
+        plan.sources = {
+            **sources,
+            "period_ids": [period_remap.get(pid, pid) for pid in sources.get("period_ids") or []],
+        }
 
     session.add(
         PlanRevision(
@@ -277,6 +355,10 @@ async def generate_plan(
             "location_id": payload.location_id,
             "location_name": location_name,
             "period_ids": used_periods,
+            # "week" plans make up the This Week board; "meal" is a one-off
+            # Advisor recommendation, which is never shown as the student's plan.
+            "kind": "week" if payload.board else "meal",
+            **({"board": payload.board.model_dump(mode="json")} if payload.board else {}),
         },
         model=model_used,
         revision_count=0,
@@ -308,7 +390,7 @@ async def refine_plan(
     session: SessionDep,
 ) -> PlanOut:
     plan = await _get_owned_plan(plan_id, user, session)
-    content, tool_used, rationale, model_used = await _propose(
+    content, tool_used, rationale, model_used, remap = await _propose(
         plan, payload.instruction, request, user, session
     )
     return await _record_revision(
@@ -319,6 +401,7 @@ async def refine_plan(
         tool_used=tool_used,
         rationale=rationale,
         model=model_used,
+        period_remap=remap,
     )
 
 
@@ -332,7 +415,7 @@ async def propose_refinement(
 ) -> PlanProposalOut:
     """Refine without saving, so the student can review the change first."""
     plan = await _get_owned_plan(plan_id, user, session)
-    content, tool_used, rationale, model_used = await _propose(
+    content, tool_used, rationale, model_used, _ = await _propose(
         plan, payload.instruction, request, user, session
     )
     return PlanProposalOut(
@@ -367,10 +450,13 @@ async def apply_proposal(
             detail="This plan changed after the proposal was made. Ask again for a fresh one.",
         )
 
-    menus, _ = await _plan_menus(plan, request)
+    menus, _, remap = await _plan_menus(plan, request)
     catalog = gemini.build_catalog(menus)
     content = gemini.hydrate_plan(
-        payload.content.model_dump(), catalog, menus, plan.targets or {}
+        _remap_periods(payload.content.model_dump(), remap),
+        catalog,
+        menus,
+        plan.targets or {},
     )
     return await _record_revision(
         plan,
@@ -380,7 +466,65 @@ async def apply_proposal(
         tool_used=payload.tool_used,
         rationale=payload.rationale,
         model=plan.model,
+        period_remap=remap,
     )
+
+
+def _board_of(plan: MealPlan) -> dict:
+    return (plan.sources or {}).get("board") or {}
+
+
+async def _recent_plans(user: CurrentUser, session: SessionDep) -> list[MealPlan]:
+    stmt = (
+        select(MealPlan)
+        .where(MealPlan.user_id == user.id)
+        .order_by(MealPlan.created_at.desc())
+        .limit(200)
+    )
+    return list((await session.scalars(stmt)).all())
+
+
+# Declared before "/{plan_id}" so "week" is not read as a plan id.
+@router.get("/week", response_model=WeekOut | None)
+async def current_week(user: CurrentUser, session: SessionDep) -> WeekOut | None:
+    """The most recent week plan, or null when there is none or it was cleared.
+
+    A cleared week is not replaced by an older one: "New plan" means an empty
+    board until the student builds another.
+    """
+    rows = await _recent_plans(user, session)
+    newest = next((row for row in rows if _board_of(row).get("id")), None)
+    if newest is None or _board_of(newest).get("archived"):
+        return None
+
+    board = _board_of(newest)
+    by_date: dict[Date, MealPlan] = {}
+    for row in rows:  # newest first, so the first plan per date wins
+        if _board_of(row).get("id") == board["id"]:
+            by_date.setdefault(row.plan_date, row)
+
+    sources = newest.sources or {}
+    return WeekOut(
+        board_id=board["id"],
+        location_id=sources.get("location_id"),
+        location_name=sources.get("location_name"),
+        query=board.get("query"),
+        periods=board.get("periods") or [],
+        dates=board.get("dates") or sorted(by_date),
+        targets=newest.targets or {},
+        plans=[PlanOut.model_validate(by_date[day]) for day in sorted(by_date)],
+    )
+
+
+@router.delete("/week/{board_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_week(board_id: str, user: CurrentUser, session: SessionDep) -> None:
+    """Take a week plan off the board. The plans themselves stay, since logged
+    meals may point at them. Idempotent, and scoped to the caller's plans."""
+    for row in await _recent_plans(user, session):
+        board = _board_of(row)
+        if board.get("id") == board_id and not board.get("archived"):
+            row.sources = {**row.sources, "board": {**board, "archived": True}}
+    await session.commit()
 
 
 @router.get("", response_model=list[PlanSummaryOut])

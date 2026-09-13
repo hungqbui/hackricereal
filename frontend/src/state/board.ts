@@ -1,7 +1,17 @@
+/**
+ * The This Week board: a few days of plans generated together.
+ *
+ * The server is the source of truth. Every day is generated with a `board`
+ * marker, and `GET /plans/week` rebuilds the most recent week from those
+ * plans, so the board survives a reload, another browser, or another origin.
+ * A copy is kept in `localStorage` for offline starts and for boards made
+ * before the server knew about weeks. "New plan" clears it on the server too.
+ */
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, api } from '../api/client'
-import type { NutritionTargets, Plan } from '../api/types'
+import type { BoardRef, NutritionTargets, Plan, WeekOut } from '../api/types'
 import { matchPeriods, type Interpretation, type PeriodName } from '../lib/parse'
 import { weekdayLabel } from '../lib/dates'
 import { fetchPeriods } from './availability'
@@ -18,6 +28,8 @@ export interface DayCell {
 }
 
 export interface Board {
+  /** The server-side week id; absent on boards saved before weeks were stored. */
+  id?: string
   locationId: string
   locationName: string
   query: string
@@ -34,6 +46,7 @@ interface StoredDay {
 }
 
 interface StoredBoard {
+  id?: string
   locationId: string
   locationName: string
   query: string
@@ -66,6 +79,7 @@ function writeStored(userId: string, board: Board | null): void {
       return
     }
     const stored: StoredBoard = {
+      id: board.id,
       locationId: board.locationId,
       locationName: board.locationName,
       query: board.query,
@@ -79,7 +93,7 @@ function writeStored(userId: string, board: Board | null): void {
     }
     window.localStorage.setItem(storageKey(userId), JSON.stringify(stored))
   } catch {
-    // Out of quota or blocked storage: the board just will not persist.
+    // Out of quota or blocked storage: the server copy still holds.
   }
 }
 
@@ -87,6 +101,36 @@ function errorMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return 'Something went wrong.'
+}
+
+function newBoardId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `board-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** Rebuild the board from `GET /plans/week`. */
+function boardFromWeek(week: WeekOut): Board {
+  const byDate = new Map(week.plans.map((plan) => [plan.plan_date, plan]))
+  const dates = [...new Set([...week.dates, ...week.plans.map((plan) => plan.plan_date)])].sort()
+  return {
+    id: week.board_id,
+    locationId: week.location_id ?? week.plans[0]?.sources.location_id ?? '',
+    locationName: week.location_name ?? week.plans[0]?.sources.location_name ?? 'Campus dining',
+    query: week.query ?? '',
+    targets: week.targets ?? {},
+    periods: week.periods as PeriodName[],
+    days: dates.map((date) => {
+      const plan = byDate.get(date) ?? null
+      return {
+        date,
+        status: (plan ? 'ready' : 'empty') as DayStatus,
+        plan,
+        message: plan ? null : 'No plan was made for this day — the hall had no menu, or it failed.',
+        refining: false,
+      }
+    }),
+  }
 }
 
 /** Run tasks with a small pool so a 7-day week is not 7 parallel requests. */
@@ -110,6 +154,7 @@ export function usePlanBoard(userId: string | null) {
 
   const commit = useCallback(
     (next: Board | null) => {
+      boardRef.current = next
       setBoard(next)
       if (userId) writeStored(userId, next)
     },
@@ -122,46 +167,78 @@ export function usePlanBoard(userId: string | null) {
       const days = current.days.map((day) =>
         day.date === date ? { ...day, ...patch } : day,
       )
-      return { ...current, days }
+      const next = { ...current, days }
+      boardRef.current = next
+      return next
     })
   }, [])
 
-  // Restore the last board on load: plan ids are stored, contents refetched.
+  // Restore on load: the server's week first, this device's copy if offline.
   useEffect(() => {
     if (!userId) {
       setBoard(null)
       return
     }
-    const stored = readStored(userId)
-    if (!stored || stored.days.length === 0) return
 
     let cancelled = false
-    setBoard({
-      locationId: stored.locationId,
-      locationName: stored.locationName,
-      query: stored.query,
-      targets: stored.targets,
-      periods: stored.periods,
-      days: stored.days.map((day) => ({
-        date: day.date,
-        status: (day.planId ? 'loading' : 'empty') as DayStatus,
-        plan: null,
-        message: day.planId ? null : day.message,
-        refining: false,
-      })),
-    })
+    // A board the student started generating while this loaded wins.
+    const stillWanted = () => !cancelled && !boardRef.current
 
-    Promise.all(
-      stored.days
-        .filter((day) => day.planId)
-        .map(async (day) => {
-          try {
-            return { date: day.date, plan: await api.getPlan(day.planId!) }
-          } catch {
-            return { date: day.date, plan: null }
-          }
-        }),
-    ).then((results) => {
+    void (async () => {
+      try {
+        const week = await api.week()
+        if (!stillWanted()) return
+        if (week) {
+          const next = boardFromWeek(week)
+          boardRef.current = next
+          setBoard(next)
+          writeStored(userId, next)
+          return
+        }
+        // No week on the server. A stored board with an id was cleared or
+        // belongs to the server's history, so only a pre-server board is kept.
+        const stored = readStored(userId)
+        if (stored?.id) {
+          writeStored(userId, null)
+          return
+        }
+        if (stored) await restoreStored(stored)
+      } catch {
+        const stored = readStored(userId)
+        if (stored && stillWanted()) await restoreStored(stored)
+      }
+    })()
+
+    /** Rebuild a board from this device's copy: plan ids stored, contents refetched. */
+    async function restoreStored(stored: StoredBoard) {
+      if (stored.days.length === 0 || !stillWanted()) return
+      setBoard({
+        id: stored.id,
+        locationId: stored.locationId,
+        locationName: stored.locationName,
+        query: stored.query,
+        targets: stored.targets,
+        periods: stored.periods,
+        days: stored.days.map((day) => ({
+          date: day.date,
+          status: (day.planId ? 'loading' : 'empty') as DayStatus,
+          plan: null,
+          message: day.planId ? null : day.message,
+          refining: false,
+        })),
+      })
+
+      const results = await Promise.all(
+        stored.days
+          .filter((day) => day.planId)
+          .map(async (day) => {
+            try {
+              return { date: day.date, plan: await api.getPlan(day.planId!) }
+            } catch {
+              return { date: day.date, plan: null }
+            }
+          }),
+      )
       if (cancelled) return
       setBoard((current) => {
         if (!current) return current
@@ -181,7 +258,7 @@ export function usePlanBoard(userId: string | null) {
           }),
         }
       })
-    })
+    }
 
     return () => {
       cancelled = true
@@ -191,7 +268,17 @@ export function usePlanBoard(userId: string | null) {
   const generate = useCallback(
     async (spec: Interpretation & { locationId: string; locationName: string }) => {
       setBusy(true)
-      const next: Board = {
+      const id = newBoardId()
+      const marker: BoardRef = {
+        id,
+        query: spec.text || null,
+        periods: spec.periods,
+        dates: spec.dates,
+      }
+      const previousId = boardRef.current?.id
+
+      commit({
+        id,
         locationId: spec.locationId,
         locationName: spec.locationName,
         query: spec.text,
@@ -204,13 +291,13 @@ export function usePlanBoard(userId: string | null) {
           message: null,
           refining: false,
         })),
-      }
-      commit(next)
+      })
 
       await pooled(spec.dates, CONCURRENCY, async (date) => {
         patchDay(date, { status: 'loading', message: null })
         try {
-          const available = await fetchPeriods(spec.locationId, date)
+          // Fresh: these ids are sent to /plans/generate, and upstream reissues them.
+          const available = await fetchPeriods(spec.locationId, date, { fresh: true })
           if (available.length === 0) {
             patchDay(date, {
               status: 'empty',
@@ -235,6 +322,7 @@ export function usePlanBoard(userId: string | null) {
             constraints: spec.text || null,
             targets: Object.keys(spec.targets).length ? spec.targets : null,
             title: `${weekdayLabel(date, 'long')} at ${spec.locationName}`,
+            board: marker,
           })
           patchDay(date, { status: 'ready', plan, message: null })
         } catch (error) {
@@ -245,39 +333,20 @@ export function usePlanBoard(userId: string | null) {
       })
 
       setBusy(false)
+      // patchDay keeps the ref current, so every finished day is stored —
+      // including the last one, which a render-time ref would still miss.
       if (userId) writeStored(userId, boardRef.current)
+      // The new week supersedes the old one on the server as well.
+      if (previousId && previousId !== id) void api.clearWeek(previousId).catch(() => undefined)
     },
     [commit, patchDay, userId],
   )
 
-  const refine = useCallback(
-    async (dates: string[], instruction: string) => {
-      const current = boardRef.current
-      if (!current) return
-      const targets = current.days.filter(
-        (day) => dates.includes(day.date) && day.plan,
-      )
-      if (!targets.length) return
-
-      setBusy(true)
-      for (const day of targets) patchDay(day.date, { refining: true, message: null })
-
-      await pooled(targets, CONCURRENCY, async (day) => {
-        try {
-          const plan = await api.refinePlan(day.plan!.id, instruction)
-          patchDay(day.date, { plan, status: 'ready', refining: false, message: null })
-        } catch (error) {
-          patchDay(day.date, { refining: false, message: errorMessage(error) })
-        }
-      })
-
-      setBusy(false)
-      if (userId) writeStored(userId, boardRef.current)
-    },
-    [patchDay, userId],
-  )
-
-  /** Swap in plans saved elsewhere — the Advisor's confirmed changes. */
+  /**
+   * Swap in plans whose change the student confirmed — from the day panel or
+   * the Advisor. Plans are never rewritten here directly: every change goes
+   * through propose → review → apply (`state/changes.ts`).
+   */
   const replacePlans = useCallback(
     (plans: Plan[]) => {
       const current = boardRef.current
@@ -295,8 +364,11 @@ export function usePlanBoard(userId: string | null) {
   )
 
   const clear = useCallback(() => {
+    const id = boardRef.current?.id
     commit(null)
+    // If this fails the week comes back on the next load, which is the safe way to fail.
+    if (id) void api.clearWeek(id).catch(() => undefined)
   }, [commit])
 
-  return { board, busy, generate, refine, replacePlans, clear }
+  return { board, busy, generate, replacePlans, clear }
 }

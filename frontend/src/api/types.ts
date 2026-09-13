@@ -106,10 +106,35 @@ export interface Revision {
   created_at: string
 }
 
+/** Marks a plan as one day of a week plan generated together. */
+export interface BoardRef {
+  id: string
+  query: string | null
+  periods: string[]
+  dates: string[]
+  archived?: boolean
+}
+
 export interface PlanSources {
   location_id?: string
   location_name?: string | null
   period_ids?: string[]
+  /** `week` plans make up the This Week board; `meal` is an Advisor recommendation. */
+  kind?: 'week' | 'meal'
+  board?: BoardRef
+}
+
+/** `GET /plans/week`: the current week plan, rebuilt server-side. */
+export interface WeekOut {
+  board_id: string
+  location_id: string | null
+  location_name: string | null
+  query: string | null
+  periods: string[]
+  dates: string[]
+  targets: NutritionTargets
+  /** One plan per date, in date order. */
+  plans: Plan[]
 }
 
 export interface Plan {
@@ -162,6 +187,8 @@ export interface PlanGenerateRequest {
   constraints?: string | null
   targets?: NutritionTargets | null
   title?: string | null
+  /** Set when the plan is a day of a week plan. */
+  board?: BoardRef | null
 }
 
 /* ------------------------------------------------------------------ dining

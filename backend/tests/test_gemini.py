@@ -7,6 +7,7 @@ macro recomputation, and revision bookkeeping.
 
 import copy
 import json
+import uuid
 
 import pytest
 
@@ -695,6 +696,48 @@ async def test_proposals_are_owner_only(api, auth, fake_gemini):
     apply = await api.post(f"/plans/{plan['id']}/apply", headers=other_headers, json=proposal)
     assert propose.status_code == 404
     assert apply.status_code == 404
+
+
+async def test_reissued_period_ids_still_refine_and_heal(api, auth, fake_gemini):
+    """DineOnCampus reissues period ids; a saved plan must follow them by name."""
+    from app.db import SessionLocal
+    from app.models import MealPlan
+
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    current = plan["sources"]["period_ids"]
+    stale = {pid: f"{index:024d}" for index, pid in enumerate(current)}
+
+    # Rewrite the stored plan as if it had been saved before the reissue.
+    async with SessionLocal() as session:
+        row = await session.get(MealPlan, uuid.UUID(plan["id"]))
+        row.sources = {**row.sources, "period_ids": [stale[pid] for pid in current]}
+        row.content = {
+            **row.content,
+            "meals": [{**meal, "period_id": stale[meal["period_id"]]} for meal in row.content["meals"]],
+        }
+        await session.commit()
+
+    # The scripted edit uses today's ids, as a model reading today's menu would.
+    _, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+    assert {meal["period_id"] for meal in proposal["content"]["meals"]} <= set(current)
+    assert len(proposal["content"]["meals"]) == len(plan["content"]["meals"]), "no duplicate meal"
+
+    saved = await api.post(f"/plans/{plan['id']}/apply", headers=headers, json=proposal)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["sources"]["period_ids"] == current
+    assert {meal["period_id"] for meal in saved.json()["content"]["meals"]} <= set(current)
+
+
+async def test_generate_still_rejects_an_unknown_period_without_a_name(api, auth):
+    headers, _ = auth
+    resp = await api.post(
+        "/plans/generate",
+        headers=headers,
+        json={**GENERATE, "period_ids": ["000000000000000000000000"]},
+    )
+    assert resp.status_code == 400
 
 
 async def test_propose_requires_gemini(api, auth):

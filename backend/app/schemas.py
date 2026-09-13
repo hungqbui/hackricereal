@@ -136,9 +136,21 @@ class MenuOut(BaseModel):
 
 # ---------- meal plans ----------
 
+class BoardRef(BaseModel):
+    """Marks a plan as one day of a week plan generated together."""
+
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    query: str | None = Field(default=None, max_length=2000)
+    periods: list[str] = Field(default=[], max_length=10)
+    # Every date the week covers, including days that produced no plan.
+    dates: list[Date] = Field(default=[], max_length=31)
+
+
 class PlanGenerateRequest(BaseModel):
     location_id: str
     date: Date
+    # Present when this plan is a day of a week plan; absent for a one-off meal.
+    board: BoardRef | None = None
     # Restrict to specific periods; empty means every period served that day.
     period_ids: list[str] = []
     constraints: str | None = Field(
@@ -266,6 +278,20 @@ class PlanOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     revisions: list[RevisionOut] = []
+
+
+class WeekOut(BaseModel):
+    """The student's current week plan, rebuilt from the plans that make it up."""
+
+    board_id: str
+    location_id: str | None
+    location_name: str | None
+    query: str | None
+    periods: list[str]
+    dates: list[Date]
+    targets: dict
+    # One plan per date (the newest), in date order.
+    plans: list[PlanOut]
 
 
 class PlanProposalOut(BaseModel):

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { api } from './api/client'
-import type { Location, MenuItem, Plan } from './api/types'
+import type { Location, Meal, MenuItem, Plan } from './api/types'
 import { AdvisorScreen } from './components/AdvisorScreen'
 import { AppShell, useTab } from './components/AppShell'
 import { AuthScreen } from './components/AuthScreen'
@@ -17,8 +17,10 @@ import { useAvailability } from './state/availability'
 import { usePlanBoard } from './state/board'
 import { useDining, type Hall } from './state/dining'
 import {
+  eatenKey,
   itemFromMenuItem,
   itemFromPlannedItem,
+  slotForPeriod,
   useMealLog,
   type LoggedItem,
   type MealSlot,
@@ -55,7 +57,7 @@ function UniBite() {
   const log = useMealLog(user?.id ?? null)
   const advisor = useAdvisor()
   const dining = useDining(locations, loadError)
-  const { board, busy, generate, refine, replacePlans, clear } = usePlanBoard(user?.id ?? null)
+  const { board, busy, generate, replacePlans, clear } = usePlanBoard(user?.id ?? null)
 
   useEffect(() => {
     api
@@ -120,9 +122,47 @@ function UniBite() {
         items: meal.items.map(itemFromPlannedItem),
         note: null,
         planId: plan.id,
+        periodId: meal.period_id,
       })
     },
     [log],
+  )
+
+  /** Week-plan meals already logged, keyed by plan and period, to the log entry. */
+  const eatenMeals = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of log.meals) {
+      if (entry.planId && entry.periodId !== undefined) {
+        map.set(eatenKey(entry.planId, entry.periodId), entry.id)
+      }
+    }
+    return map
+  }, [log.meals])
+
+  /** Mark a week-plan meal eaten by logging its items, or undo that. */
+  const onToggleEaten = useCallback(
+    (plan: Plan, meal: Meal, locationName: string) => {
+      const existing = eatenMeals.get(eatenKey(plan.id, meal.period_id))
+      if (existing) {
+        log.remove(existing)
+        return
+      }
+      const [first, ...rest] = meal.items
+      log.log({
+        date: plan.plan_date,
+        slot: slotForPeriod(meal.period_name),
+        title: first
+          ? `${first.name ?? 'Item'}${rest.length ? ` + ${rest.length} more` : ''}`
+          : meal.period_name ?? 'Planned meal',
+        locationId: plan.sources.location_id ?? null,
+        locationName,
+        items: meal.items.map(itemFromPlannedItem),
+        note: null,
+        planId: plan.id,
+        periodId: meal.period_id,
+      })
+    },
+    [eatenMeals, log],
   )
 
   /* ------------------------------------------------------------ dining */
@@ -237,7 +277,9 @@ function UniBite() {
           specEdited={Object.keys(overrides).length > 0}
           availability={availability}
           onClearBoard={clear}
-          onRefine={(dates, instruction) => void refine(dates, instruction)}
+          onPlansChanged={replacePlans}
+          eatenMeals={eatenMeals}
+          onToggleEaten={onToggleEaten}
         />
       )}
 

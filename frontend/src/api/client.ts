@@ -11,6 +11,7 @@ import type {
   ProfileUpdate,
   TokenOut,
   User,
+  WeekOut,
 } from './types'
 
 // In development Vite proxies /api to the backend, so no CORS round trip.
@@ -175,6 +176,13 @@ export const api = {
     }),
 
   getPlan: (planId: string) => request<Plan>(`/plans/${planId}`),
+
+  /** The current week plan, or `null` when there is none or it was cleared. */
+  week: () => request<WeekOut | null>('/plans/week'),
+
+  /** Take a week plan off the board; its plans are kept. */
+  clearWeek: (boardId: string) =>
+    request<void>(`/plans/week/${encodeURIComponent(boardId)}`, { method: 'DELETE' }),
 
   deletePlan: (planId: string) =>
     request<void>(`/plans/${planId}`, { method: 'DELETE' }),

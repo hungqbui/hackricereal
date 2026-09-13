@@ -48,8 +48,18 @@ export interface LoggedMeal {
   loggedAt: string
   items: LoggedItem[]
   note: string | null
-  /** Set when the meal came from an advisor recommendation. */
+  /** Set when the meal came from an advisor recommendation or a week plan. */
   planId: string | null
+  /**
+   * The plan's meal period this was logged from, so a week plan can show which
+   * of its meals were eaten. Absent on entries logged before it existed.
+   */
+  periodId?: string | null
+}
+
+/** Identifies one meal of one plan, for "was this eaten?" lookups. */
+export function eatenKey(planId: string, periodId: string | null | undefined): string {
+  return `${planId}:${periodId ?? ''}`
 }
 
 export interface DayTotals {

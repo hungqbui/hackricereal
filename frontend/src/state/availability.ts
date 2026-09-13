@@ -7,9 +7,13 @@
  * date far ahead comes back empty even for a hall that serves all day.
  *
  * The composer needs both facts before the user commits to a plan, so this
- * loads the real period list for every selected date and caches it. The
- * cache is module-level and shared with the plan board, so selecting a day
- * in the composer and then planning it costs one request, not two.
+ * loads the real period list for every selected date and caches it briefly.
+ *
+ * Period ids are not stable: DineOnCampus reissues a hall's ids when it
+ * republishes menus. Anything that sends ids to the API — generating a plan,
+ * recommending a meal — must ask for `{ fresh: true }`, or it can send an id
+ * the backend no longer recognises. Only the composer's "is Lunch served?"
+ * check reads the cache, and it only looks at names.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -18,22 +22,27 @@ import { api } from '../api/client'
 import type { Period } from '../api/types'
 import { PERIOD_ORDER, matchPeriods, type PeriodName } from '../lib/parse'
 
-const cache = new Map<string, Period[]>()
+const CACHE_MS = 60_000
+const cache = new Map<string, { at: number; periods: Period[] }>()
 
 function key(locationId: string, date: string): string {
   return `${locationId}:${date}`
 }
 
-/** Cached period lookup. Shared by the composer and the plan board. */
+/**
+ * Period lookup. `fresh` skips the cache (and refills it) — use it whenever the
+ * ids will be sent back to the API.
+ */
 export async function fetchPeriods(
   locationId: string,
   date: string,
+  options: { fresh?: boolean } = {},
 ): Promise<Period[]> {
   const cacheKey = key(locationId, date)
   const hit = cache.get(cacheKey)
-  if (hit) return hit
+  if (hit && !options.fresh && Date.now() - hit.at < CACHE_MS) return hit.periods
   const payload = await api.periods(locationId, date)
-  cache.set(cacheKey, payload.periods)
+  cache.set(cacheKey, { at: Date.now(), periods: payload.periods })
   return payload.periods
 }
 

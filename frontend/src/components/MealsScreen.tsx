@@ -15,7 +15,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 
-import type { Location } from '../api/types'
+import type { Location, Meal, Plan } from '../api/types'
 import { addDays, friendlyDate, todayISO, weekdayLabel } from '../lib/dates'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
 import type { Interpretation } from '../lib/parse'
@@ -73,7 +73,11 @@ export interface MealsScreenProps {
   specEdited: boolean
   availability: Availability
   onClearBoard: () => void
-  onRefine: (dates: string[], instruction: string) => void
+  /** Plans whose change was reviewed and confirmed in the day panel. */
+  onPlansChanged: (plans: Plan[]) => void
+  /** Logged week-plan meals, keyed by `eatenKey(planId, periodId)`. */
+  eatenMeals: Map<string, string>
+  onToggleEaten: (plan: Plan, meal: Meal, locationName: string) => void
 }
 
 export function MealsScreen(props: MealsScreenProps) {
@@ -325,7 +329,9 @@ function WeekView({
   specEdited,
   availability,
   onClearBoard,
-  onRefine,
+  onPlansChanged,
+  eatenMeals,
+  onToggleEaten,
 }: MealsScreenProps) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const selectedDay = board?.days.find((day) => day.date === selectedDate) ?? null
@@ -369,7 +375,12 @@ function WeekView({
       />
 
       {board ? (
-        <WeekBoard board={board} selectedDate={selectedDate} onSelect={setSelectedDate} />
+        <WeekBoard
+          board={board}
+          selectedDate={selectedDate}
+          onSelect={setSelectedDate}
+          eatenMeals={eatenMeals}
+        />
       ) : (
         <EmptyState icon={IconCalendar} title="Plan a few days at once">
           Describe a day or a week in plain English — “high protein lunches at Moody Towers this
@@ -383,7 +394,9 @@ function WeekView({
           board={board}
           busy={busy}
           onClose={() => setSelectedDate(null)}
-          onRefine={onRefine}
+          onPlansChanged={onPlansChanged}
+          eatenMeals={eatenMeals}
+          onToggleEaten={onToggleEaten}
         />
       )}
     </div>
