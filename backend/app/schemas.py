@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-    full_name: str | None = Field(default=None, max_length=120)
 
 
 class UserLogin(BaseModel):
@@ -29,20 +28,11 @@ class NutritionTargets(BaseModel):
     sodium_mg: float | None = Field(default=None, ge=0, le=20000)
 
 
-class UserProfileUpdate(BaseModel):
-    full_name: str | None = Field(default=None, max_length=120)
-    targets: NutritionTargets | None = None
-    dietary_notes: str | None = Field(default=None, max_length=2000)
-
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     email: EmailStr
-    full_name: str | None
-    targets: dict
-    dietary_notes: str | None
     created_at: datetime
 
 

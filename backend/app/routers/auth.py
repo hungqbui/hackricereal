@@ -9,7 +9,6 @@ from ..schemas import (
     UserCreate,
     UserLogin,
     UserOut,
-    UserProfileUpdate,
 )
 from ..security import create_access_token, hash_password, verify_password
 
@@ -31,12 +30,7 @@ async def register(payload: UserCreate, session: SessionDep) -> TokenOut:
             detail="An account with that email already exists.",
         )
 
-    user = User(
-        email=email,
-        password_hash=hash_password(payload.password),
-        full_name=payload.full_name,
-        targets={},
-    )
+    user = User(email=email, password_hash=hash_password(payload.password))
     session.add(user)
     try:
         await session.commit()

@@ -33,12 +33,6 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    full_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-
-    # Default nutrition targets, reused when a plan request omits them.
-    targets: Mapped[dict] = mapped_column(JSONType, default=dict)
-    # Standing dietary constraints in natural language, e.g. "vegetarian, no nuts".
-    dietary_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
