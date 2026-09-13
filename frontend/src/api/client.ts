@@ -1,8 +1,11 @@
 import type {
   Location,
+  LocationDetails,
+  Menu,
   PeriodsOut,
   Plan,
   PlanGenerateRequest,
+  PlanSummary,
   TokenOut,
   User,
 } from './types'
@@ -108,6 +111,28 @@ export const api = {
     request<PeriodsOut>(
       `/dining/locations/${encodeURIComponent(locationId)}/periods?date=${date}`,
     ),
+
+  /** Hall metadata, including the published open/closed status sentence. */
+  locationDetails: (locationId: string, signal?: AbortSignal) =>
+    request<LocationDetails>(
+      `/dining/locations/${encodeURIComponent(locationId)}/details`,
+      { signal },
+    ),
+
+  menu: (locationId: string, date: string, periodId: string, signal?: AbortSignal) =>
+    request<Menu>(
+      `/dining/locations/${encodeURIComponent(locationId)}/menu` +
+        `?date=${date}&period=${encodeURIComponent(periodId)}`,
+      { signal },
+    ),
+
+  listPlans: (params: { date?: string; limit?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.date) query.set('date', params.date)
+    if (params.limit) query.set('limit', String(params.limit))
+    const suffix = query.toString()
+    return request<PlanSummary[]>(`/plans${suffix ? `?${suffix}` : ''}`)
+  },
 
   generatePlan: (body: PlanGenerateRequest, signal?: AbortSignal) =>
     request<Plan>('/plans/generate', { method: 'POST', body, signal }),

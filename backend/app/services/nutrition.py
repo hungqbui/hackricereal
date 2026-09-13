@@ -1,22 +1,45 @@
 """Normalise DineOnCampus menu payloads into flat, macro-bearing items."""
 
+import re
 from typing import Any
 
 # DineOnCampus nutrient labels -> our field names.
+#
+# UH serves two labelling conventions side by side, apparently from two
+# upstream feeds: some locations report "Protein (g)" and others plain
+# "Protein", with the unit only in the sibling ``uom`` field. Moody Towers uses
+# the first, Cougar Woods the second. Matching literal strings meant every
+# macro but calories came back null for whole dining halls -- about 35% of
+# campus -- so labels are normalised to a unit-less, lower-case key first.
+#
+# Keys here must be the *normalised* form. Watch the near-misses: "Calories
+# From Fat", "Fat Calories", "Trans Fat" and "Saturated Fat + Trans Fat" all
+# normalise to distinct keys and are deliberately absent, so none of them can
+# be mistaken for calories, fat, or saturated fat.
 NUTRIENT_MAP = {
-    "Calories": "calories",
-    "Protein (g)": "protein_g",
-    "Total Carbohydrates (g)": "carbs_g",
-    "Total Fat (g)": "fat_g",
-    "Saturated Fat (g)": "saturated_fat_g",
-    "Dietary Fiber (g)": "fiber_g",
-    "Sugar (g)": "sugar_g",
-    "Sodium (mg)": "sodium_mg",
-    "Cholesterol (mg)": "cholesterol_mg",
-    "Potassium (mg)": "potassium_mg",
-    "Calcium (mg)": "calcium_mg",
-    "Iron (mg)": "iron_mg",
+    "calories": "calories",
+    "protein": "protein_g",
+    "total carbohydrates": "carbs_g",
+    "carbohydrates": "carbs_g",
+    "total fat": "fat_g",
+    "saturated fat": "saturated_fat_g",
+    "dietary fiber": "fiber_g",
+    "fiber": "fiber_g",
+    "sugar": "sugar_g",
+    "sugars": "sugar_g",
+    "sodium": "sodium_mg",
+    "cholesterol": "cholesterol_mg",
+    "potassium": "potassium_mg",
+    "calcium": "calcium_mg",
+    "iron": "iron_mg",
 }
+
+_UNIT_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def normalise_nutrient(name: str) -> str:
+    """"Protein (g)" and "Protein" are the same nutrient; make them one key."""
+    return _UNIT_SUFFIX.sub("", (name or "").strip()).strip().lower()
 
 MACRO_FIELDS = (
     "calories",
@@ -52,13 +75,15 @@ def parse_item(raw: dict, category: str) -> dict:
     """Turn one menu item into a flat record with numeric macros."""
     nutrients: dict[str, float] = {}
     for entry in raw.get("nutrients") or []:
-        field = NUTRIENT_MAP.get(entry.get("name") or "")
+        field = NUTRIENT_MAP.get(normalise_nutrient(entry.get("name") or ""))
         if not field:
             continue
         value = _to_float(entry.get("valueNumeric"))
         if value is None:
             value = _to_float(entry.get("value"))
-        if value is not None:
+        # An item carrying both spellings reports the same number twice; keep
+        # the first so the result does not depend on nutrient ordering.
+        if value is not None and field not in nutrients:
             nutrients[field] = value
 
     if "calories" not in nutrients:
@@ -117,12 +142,26 @@ def flatten_menu(payload: dict, location_id: str, date: str) -> dict:
 
 
 def empty_totals() -> dict[str, float]:
+    """Totals for a plan that selected nothing: genuinely zero, not unknown."""
     return {field: 0.0 for field in MACRO_FIELDS}
 
 
-def sum_macros(rows: list[dict], servings_key: str = "servings") -> dict[str, float]:
-    """Sum macros across chosen items, scaled by serving count."""
-    totals = empty_totals()
+def sum_macros(
+    rows: list[dict], servings_key: str = "servings"
+) -> dict[str, float | None]:
+    """Sum macros across chosen items, scaled by serving count.
+
+    A macro that **no** row published comes back ``None``, not ``0.0``. UH omits
+    a macro on a minority of items, and folding those omissions into a zero made
+    the API state "0g protein" as fact — indistinguishable from a real zero, and
+    the one kind of invented nutrition this service exists to prevent.
+
+    Where only *some* rows carry the macro the known values are still summed:
+    a partial total is more useful than discarding good data, and it errs low,
+    which is the safe direction for a figure a student eats against.
+    """
+    totals: dict[str, float] = {field: 0.0 for field in MACRO_FIELDS}
+    published: set[str] = set()
     for row in rows:
         try:
             servings = float(row.get(servings_key) or 1)
@@ -130,6 +169,10 @@ def sum_macros(rows: list[dict], servings_key: str = "servings") -> dict[str, fl
             servings = 1.0
         for field in MACRO_FIELDS:
             value = row.get(field)
-            if isinstance(value, (int, float)):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
                 totals[field] += float(value) * servings
-    return {k: round(v, 1) for k, v in totals.items()}
+                published.add(field)
+    return {
+        field: round(totals[field], 1) if field in published else None
+        for field in MACRO_FIELDS
+    }

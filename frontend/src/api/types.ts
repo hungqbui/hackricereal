@@ -75,7 +75,8 @@ export interface Meal {
   period_name: string | null
   notes: string | null
   items: PlannedItem[]
-  totals: Partial<Record<MacroField, number>>
+  /** A macro is `null` when no item in the selection published it. */
+  totals: Partial<Record<MacroField, number | null>>
 }
 
 export interface TargetFitEntry {
@@ -89,7 +90,8 @@ export interface PlanContent {
   title: string
   summary: string | null
   meals: Meal[]
-  totals: Partial<Record<MacroField, number>>
+  /** A macro is `null` when no item in the selection published it. */
+  totals: Partial<Record<MacroField, number | null>>
   target_fit: Partial<Record<MacroField, TargetFitEntry>>
   constraint_notes: string[]
   warnings: string[]
@@ -133,4 +135,70 @@ export interface PlanGenerateRequest {
   constraints?: string | null
   targets?: NutritionTargets | null
   title?: string | null
+}
+
+/* ------------------------------------------------------------------ dining
+ *
+ * `GET /dining/locations/{id}/details` proxies the DineOnCampus payload
+ * verbatim. Only the fields the UI reads are typed here; `status.message` is
+ * the human sentence the hall publishes ("Open 24 hours.", "Closed. Opens at
+ * 11:00am.") and drives the open/closed chip.
+ */
+
+export type LocationStatusLabel = 'open' | 'closed' | string
+
+export interface LocationStatus {
+  label: LocationStatusLabel | null
+  message: string | null
+  color: 'green' | 'yellow' | 'red' | string | null
+}
+
+export interface LocationDetails {
+  id: string
+  name: string | null
+  slug: string | null
+  description: string | null
+  shortDescription: string | null
+  buildingName: string | null
+  status: LocationStatus | null
+}
+
+/** One item off a live menu. Same macro fields as a planned item, unscaled. */
+export interface MenuItem {
+  id: string | null
+  name: string | null
+  category: string
+  portion: string | null
+  description: string | null
+  ingredients: string | null
+  tags: string[]
+  allergens: string[]
+  calories: number | null
+  protein_g: number | null
+  carbs_g: number | null
+  fat_g: number | null
+  saturated_fat_g: number | null
+  fiber_g: number | null
+  sugar_g: number | null
+  sodium_mg: number | null
+}
+
+export interface Menu {
+  location_id: string
+  date: string
+  period_id: string | null
+  period_name: string | null
+  closed: boolean
+  status: string | null
+  categories: Array<string | null>
+  items: MenuItem[]
+}
+
+export interface PlanSummary {
+  id: string
+  plan_date: string
+  title: string
+  revision_count: number
+  created_at: string
+  updated_at: string
 }

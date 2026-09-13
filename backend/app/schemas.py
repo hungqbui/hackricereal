@@ -137,14 +137,16 @@ class MealOut(BaseModel):
     period_name: str | None = None
     notes: str | None = None
     items: list[PlannedItemOut] = []
-    totals: dict[str, float] = {}
+    # A macro is None when no item in the selection published it.
+    totals: dict[str, float | None] = {}
 
 
 class PlanContentOut(BaseModel):
     title: str
     summary: str | None = None
     meals: list[MealOut] = []
-    totals: dict[str, float] = {}
+    # A macro is None when no item in the selection published it.
+    totals: dict[str, float | None] = {}
     target_fit: dict = {}
     constraint_notes: list[str] = []
     warnings: list[str] = []

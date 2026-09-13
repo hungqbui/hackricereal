@@ -117,11 +117,12 @@ async def generate_plan(
         _client(request), payload.location_id, date, payload.period_ids
     )
 
-    # Request targets win; otherwise fall back to the user's saved profile.
+    # The users table stores credentials only, so targets and dietary notes
+    # travel with the request rather than living on a profile.
     targets = (
         payload.targets.model_dump(exclude_none=True)
         if payload.targets is not None
-        else dict(user.targets or {})
+        else {}
     )
 
     try:
@@ -129,13 +130,13 @@ async def generate_plan(
             menus=menus,
             targets=targets,
             constraints=payload.constraints,
-            dietary_notes=user.dietary_notes,
+            dietary_notes=None,
             date=date,
             location_name=location_name,
         )
     except gemini.GeminiUnavailable:
         selection = gemini.fallback_selection(
-            menus, targets, payload.constraints, user.dietary_notes
+            menus, targets, payload.constraints, None
         )
         model_used = "fallback-greedy"
     except gemini.GeminiError as exc:
@@ -208,7 +209,7 @@ async def refine_plan(
             menus=menus,
             instruction=payload.instruction,
             targets=plan.targets or {},
-            dietary_notes=user.dietary_notes,
+            dietary_notes=None,
             date=date,
             location_name=location_name,
         )
