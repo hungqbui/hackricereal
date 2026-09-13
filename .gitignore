@@ -1,0 +1,44 @@
+# ---- Secrets ----
+# Never commit real credentials. Only .env.example (placeholders) is tracked.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+service-account*.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Databases / local data ----
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- Node / Expo ----
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+greenlet==3.1.1
+httpx==0.28.1
+# Cloudflare fingerprints TLS; curl_cffi impersonates Chrome's handshake.
+curl_cffi==0.16.3
+bcrypt==4.2.1
+pyjwt==2.10.1
+python-multipart==0.0.20
+google-genai==2.23.0
+email-validator==2.2.0
