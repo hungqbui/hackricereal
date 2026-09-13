@@ -209,9 +209,11 @@ worth knowing before you read the diff:
   endpoints, about four frontend files.
 - **Design tokens replaced the palette by remapping existing token names** at
   the top of `styles.css` rather than rewriting 1,500 lines of working CSS.
-  Two deliberate casualties: the orange accent is gone, and so is dark mode
-  (the tokens define a light palette only). The dark block is the most
-  reversible thing here.
+  Two deliberate casualties: the orange accent is gone from the UI, and so is
+  dark mode (the tokens define a light palette only). The dark block is the
+  most reversible thing here. Orange survives in exactly one place — the
+  carrot inside the `LogoUniBite` artwork. It is part of a supplied bitmap,
+  not a token, so no CSS rule can reach it.
 
 ### Things that will look odd in the diff
 

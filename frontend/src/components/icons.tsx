@@ -6,13 +6,23 @@
  * `aria-label`/`title` so the meaning survives for screen readers and on hover.
  */
 
-import type { JSX, SVGProps } from 'react'
+import type { ImgHTMLAttributes, JSX, SVGProps } from 'react'
 
 import type { MacroField } from '../api/types'
+import markUrl from '../assets/unibite-mark.png'
 
 export interface IconProps extends SVGProps<SVGSVGElement> {
   size?: number
   /** Accessible name. Omit for icons that only decorate labelled text. */
+  label?: string
+}
+
+/** The brand mark is a bitmap, so it takes image props rather than SVG ones. */
+export interface LogoProps
+  extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt' | 'height' | 'width'> {
+  /** Rendered height in px; width follows the artwork's aspect ratio. */
+  size?: number
+  /** Accessible name. Omit where the mark only decorates labelled text. */
   label?: string
 }
 
@@ -42,34 +52,32 @@ function Svg({ size = 18, label, children, ...rest }: IconProps) {
 /* ------------------------------------------------------------------ brand */
 
 /**
- * The UniBite mark: a mortarboard over a bowl with a bite out of the rim.
- * Solid rather than stroked, so it holds up at favicon size.
+ * The UniBite mark.
+ *
+ * This is the supplied artwork, not a drawing of it. The source file was a
+ * JPEG whose transparency checkerboard was painted into the pixels (JPEG
+ * carries no alpha channel at all), so the background was flood-filled away
+ * from the borders and the wordmark's connected components were dropped,
+ * leaving the bowl alone on real transparency. It was then rotated +8.27deg
+ * to bring the bowl's rim to level -- the source art sits on a tilted
+ * baseline. Both steps are transforms of the supplied pixels; nothing here
+ * was redrawn.
+ *
+ * Being a bitmap, it has two consequences the vector mark did not have:
+ * it cannot follow `currentColor`, and its charcoal bowl disappears on a dark
+ * ground. Anywhere it sits on the forest panel it needs a light tile behind
+ * it -- see `.brand-tile` in `styles.css`.
  */
-export const LogoUniBite = ({ size = 28, label, ...rest }: IconProps) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 48 48"
-    fill="currentColor"
-    role={label ? 'img' : undefined}
-    aria-label={label}
+export const LogoUniBite = ({ size = 28, label, style, ...rest }: LogoProps) => (
+  <img
+    src={markUrl}
+    alt={label ?? ''}
     aria-hidden={label ? undefined : true}
-    focusable="false"
+    title={label}
+    draggable={false}
+    style={{ height: size, width: 'auto', ...style }}
     {...rest}
-  >
-    {label && <title>{label}</title>}
-    {/* mortarboard */}
-    <path d="M24 5.5 2.5 13.4 24 21.3l21.5-7.9z" />
-    {/* tassel: cord down the right side, bead at the end */}
-    <rect x="42.3" y="14.2" width="2.1" height="8.4" rx="1.05" />
-    <circle cx="43.35" cy="25.1" r="2.4" />
-    {/* bowl, with a bite taken out of the upper-right rim */}
-    <path
-      fillRule="evenodd"
-      clipRule="evenodd"
-      d="M4.5 25.2h39a19.5 19.5 0 0 1-39 0z M46.4 31a5.6 5.6 0 1 0-11.2 0 5.6 5.6 0 0 0 11.2 0z"
-    />
-  </svg>
+  />
 )
 
 /* ------------------------------------------------------------ meal periods */
@@ -459,6 +467,22 @@ export const IconSearch = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="11" cy="11" r="6.5" />
     <path d="M15.8 15.8 20.5 20.5" />
+  </Svg>
+)
+
+export const IconEye = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z" />
+    <circle cx="12" cy="12" r="3.1" />
+  </Svg>
+)
+
+export const IconEyeOff = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9.9 6.1A8.9 8.9 0 0 1 12 5.8c6 0 9.5 6.2 9.5 6.2a17 17 0 0 1-3.3 4" />
+    <path d="M6.4 8A17 17 0 0 0 2.5 12S6 18.2 12 18.2a8.7 8.7 0 0 0 3.8-.85" />
+    <path d="M10 10a2.9 2.9 0 0 0 4 4" />
+    <path d="M4 4l16 16" />
   </Svg>
 )
 
