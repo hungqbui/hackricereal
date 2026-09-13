@@ -1,6 +1,6 @@
-# CougarGrub — frontend
+# UniBite — frontend
 
-A small React + TypeScript app over the CougarGrub API. You describe a day or a
+A small React + TypeScript app over the UniBite API. You describe a day or a
 week in plain English; it builds meal plans from the **live** University of
 Houston DineOnCampus menus and lets you talk the plan into something better.
 

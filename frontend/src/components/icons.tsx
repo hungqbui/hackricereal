@@ -39,6 +39,39 @@ function Svg({ size = 18, label, children, ...rest }: IconProps) {
   )
 }
 
+/* ------------------------------------------------------------------ brand */
+
+/**
+ * The UniBite mark: a mortarboard over a bowl with a bite out of the rim.
+ * Solid rather than stroked, so it holds up at favicon size.
+ */
+export const LogoUniBite = ({ size = 28, label, ...rest }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 48 48"
+    fill="currentColor"
+    role={label ? 'img' : undefined}
+    aria-label={label}
+    aria-hidden={label ? undefined : true}
+    focusable="false"
+    {...rest}
+  >
+    {label && <title>{label}</title>}
+    {/* mortarboard */}
+    <path d="M24 5.5 2.5 13.4 24 21.3l21.5-7.9z" />
+    {/* tassel: cord down the right side, bead at the end */}
+    <rect x="42.3" y="14.2" width="2.1" height="8.4" rx="1.05" />
+    <circle cx="43.35" cy="25.1" r="2.4" />
+    {/* bowl, with a bite taken out of the upper-right rim */}
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M4.5 25.2h39a19.5 19.5 0 0 1-39 0z M46.4 31a5.6 5.6 0 1 0-11.2 0 5.6 5.6 0 0 0 11.2 0z"
+    />
+  </svg>
+)
+
 /* ------------------------------------------------------------ meal periods */
 
 export const IconBreakfast = (p: IconProps) => (
@@ -214,6 +247,15 @@ export const IconCalendar = (p: IconProps) => (
     <rect x="3.5" y="5" width="17" height="16" rx="2.5" />
     <path d="M3.5 10h17" />
     <path d="M8 3v4M16 3v4" />
+  </Svg>
+)
+
+export const IconCalendarOff = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20.5 12V7.5a2.5 2.5 0 0 0-2.5-2.5H6a2.5 2.5 0 0 0-2.5 2.5V18A2.5 2.5 0 0 0 6 20.5h6" />
+    <path d="M3.5 10h17" />
+    <path d="M8 3v4M16 3v4" />
+    <path d="M15 18l5 4M20 18l-5 4" />
   </Svg>
 )
 

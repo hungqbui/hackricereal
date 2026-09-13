@@ -11,7 +11,7 @@ import {
 import { ApiError, api, setToken } from '../api/client'
 import type { User } from '../api/types'
 
-const TOKEN_KEY = 'cougargrub.token'
+const TOKEN_KEY = 'unibite.token'
 
 interface AuthValue {
   user: User | null

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, api } from '../api/client'
-import type { NutritionTargets, Period, Plan } from '../api/types'
+import type { NutritionTargets, Plan } from '../api/types'
 import { matchPeriods, type Interpretation, type PeriodName } from '../lib/parse'
 import { weekdayLabel } from '../lib/dates'
+import { fetchPeriods } from './availability'
 
 export type DayStatus = 'queued' | 'loading' | 'ready' | 'empty' | 'error'
 
@@ -41,7 +42,7 @@ interface StoredBoard {
   days: StoredDay[]
 }
 
-const STORAGE_PREFIX = 'cougargrub.board.'
+const STORAGE_PREFIX = 'unibite.board.'
 // Two at a time: fast enough for a week, gentle on the upstream menu API.
 const CONCURRENCY = 2
 
@@ -103,7 +104,6 @@ async function pooled<T>(items: T[], limit: number, run: (item: T) => Promise<vo
 export function usePlanBoard(userId: string | null) {
   const [board, setBoard] = useState<Board | null>(null)
   const [busy, setBusy] = useState(false)
-  const periodCache = useRef(new Map<string, Period[]>())
   const boardRef = useRef<Board | null>(null)
 
   boardRef.current = board
@@ -188,18 +188,6 @@ export function usePlanBoard(userId: string | null) {
     }
   }, [userId])
 
-  const loadPeriods = useCallback(
-    async (locationId: string, date: string): Promise<Period[]> => {
-      const key = `${locationId}:${date}`
-      const cached = periodCache.current.get(key)
-      if (cached) return cached
-      const payload = await api.periods(locationId, date)
-      periodCache.current.set(key, payload.periods)
-      return payload.periods
-    },
-    [],
-  )
-
   const generate = useCallback(
     async (spec: Interpretation & { locationId: string; locationName: string }) => {
       setBusy(true)
@@ -222,7 +210,7 @@ export function usePlanBoard(userId: string | null) {
       await pooled(spec.dates, CONCURRENCY, async (date) => {
         patchDay(date, { status: 'loading', message: null })
         try {
-          const available = await loadPeriods(spec.locationId, date)
+          const available = await fetchPeriods(spec.locationId, date)
           if (available.length === 0) {
             patchDay(date, {
               status: 'empty',
@@ -259,7 +247,7 @@ export function usePlanBoard(userId: string | null) {
       setBusy(false)
       if (userId) writeStored(userId, boardRef.current)
     },
-    [commit, loadPeriods, patchDay, userId],
+    [commit, patchDay, userId],
   )
 
   const refine = useCallback(

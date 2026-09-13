@@ -4,6 +4,8 @@ import type { Location, NutritionTargets } from '../api/types'
 import { friendlyDate, monthDayLabel, todayISO, weekdayLabel } from '../lib/dates'
 import { MACRO_LABELS, MACRO_UNITS, TARGET_FIELDS } from '../lib/format'
 import { EXAMPLE_PROMPTS, PERIOD_ORDER, type Interpretation, type PeriodName } from '../lib/parse'
+import type { Availability } from '../state/availability'
+import { IconCalendar, IconWarn, periodIcon } from './icons'
 
 interface ComposerProps {
   query: string
@@ -16,6 +18,7 @@ interface ComposerProps {
   edited: boolean
   busy: boolean
   compact: boolean
+  availability: Availability
 }
 
 export function Composer({
@@ -29,6 +32,7 @@ export function Composer({
   edited,
   busy,
   compact,
+  availability,
 }: ComposerProps) {
   const today = todayISO()
   const grouped = useMemo(() => {
@@ -42,7 +46,13 @@ export function Composer({
     return [...buckets.entries()]
   }, [locations])
 
-  const canSubmit = Boolean(spec.locationId) && spec.dates.length > 0 && !busy
+  const canSubmit =
+    Boolean(spec.locationId) &&
+    spec.dates.length > 0 &&
+    !busy &&
+    !availability.allClosed
+
+  const closedDates = new Set(availability.closedDates)
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -140,18 +150,26 @@ export function Composer({
         <div className="interpretation-group">
           <span className="interpretation-label">Days</span>
           <div className="chip-row">
-            {spec.dates.map((date) => (
-              <button
-                key={date}
-                type="button"
-                className="chip removable"
-                onClick={() => removeDate(date)}
-                title="Remove this day"
-              >
-                {date === today ? 'Today' : `${weekdayLabel(date)} ${monthDayLabel(date)}`}
-                <span aria-hidden="true">×</span>
-              </button>
-            ))}
+            {spec.dates.map((date) => {
+              const noMenu = closedDates.has(date)
+              return (
+                <button
+                  key={date}
+                  type="button"
+                  className={noMenu ? 'chip removable no-menu' : 'chip removable'}
+                  onClick={() => removeDate(date)}
+                  title={
+                    noMenu
+                      ? 'No menu published for this day — click to remove it'
+                      : 'Remove this day'
+                  }
+                >
+                  {noMenu && <IconWarn size={13} />}
+                  {date === today ? 'Today' : `${weekdayLabel(date)} ${monthDayLabel(date)}`}
+                  <span aria-hidden="true">×</span>
+                </button>
+              )
+            })}
             <label className="chip add">
               +
               <input
@@ -170,17 +188,47 @@ export function Composer({
             Meals{spec.periods.length === 0 && <em> · everything served</em>}
           </span>
           <div className="chip-row">
-            {PERIOD_ORDER.map((period) => (
-              <button
-                key={period}
-                type="button"
-                className={spec.periods.includes(period) ? 'chip on' : 'chip'}
-                onClick={() => togglePeriod(period)}
-              >
-                {period}
-              </button>
-            ))}
+            {PERIOD_ORDER.map((period) => {
+              const known = !availability.loading && availability.byDate.length > 0
+              // Until the lookup lands, treat everything as offerable rather
+              // than flashing every chip to "not served".
+              const isServed = !known || availability.served.has(period)
+              const isPartial = availability.partial.has(period)
+              const Icon = periodIcon(period)
+              const classes = ['chip']
+              if (spec.periods.includes(period)) classes.push('on')
+              if (!isServed) classes.push('unserved')
+              else if (isPartial) classes.push('partial')
+
+              return (
+                <button
+                  key={period}
+                  type="button"
+                  className={classes.join(' ')}
+                  onClick={() => togglePeriod(period)}
+                  disabled={!isServed}
+                  title={
+                    !isServed
+                      ? `${period} is not served here on the days you picked`
+                      : isPartial
+                        ? `${period} is not served on every day you picked`
+                        : period
+                  }
+                >
+                  <Icon size={14} />
+                  {period}
+                  {isServed && isPartial && <IconWarn size={12} />}
+                </button>
+              )
+            })}
           </div>
+          {availability.unavailableSelected.length > 0 && (
+            <p className="availability-note warn">
+              <IconWarn size={14} />
+              {availability.unavailableSelected.join(' and ')} is not served here
+              on these days — those days will come back empty.
+            </p>
+          )}
         </div>
 
         <details className="interpretation-group targets" open={setTargets.length > 0}>
@@ -229,6 +277,27 @@ export function Composer({
             : 'Pick at least one day.'}
           {' '}⌘↵ to build.
         </p>
+
+        {availability.allClosed ? (
+          <p className="availability-note warn">
+            <IconWarn size={14} />
+            This location publishes no menu on the day
+            {spec.dates.length > 1 ? 's' : ''} you picked. Try another hall or
+            a nearer date.
+          </p>
+        ) : (
+          availability.closedDates.length > 0 && (
+            <p className="availability-note warn">
+              <IconCalendar size={14} />
+              No menu for{' '}
+              {availability.closedDates
+                .map((date) => (date === today ? 'today' : weekdayLabel(date)))
+                .join(', ')}
+              . {availability.closedDates.length === 1 ? 'That day' : 'Those days'}{' '}
+              will be skipped.
+            </p>
+          )
+        )}
         {edited && (
           <button type="button" className="link" onClick={onReset}>
             Reset to what I typed

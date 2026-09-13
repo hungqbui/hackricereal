@@ -6,7 +6,7 @@ import { PERIOD_ORDER } from '../lib/parse'
 import { monthDayLabel, todayISO, weekdayLabel } from '../lib/dates'
 import { DUR, EASE, STAGGER, gsap, useGSAP } from '../lib/motion'
 import { FitRing, MacroLine } from './Macros'
-import { IconMore, IconWarn, periodIcon } from './icons'
+import { IconCalendarOff, IconMore, IconWarn, periodIcon } from './icons'
 import type { Board, DayCell } from '../state/board'
 
 const MAX_PREVIEW_ITEMS = 3
@@ -128,7 +128,7 @@ function DayColumn({
           </span>
           <span className="day-date">{monthDayLabel(day.date)}</span>
         </span>
-        {day.plan && (
+        {day.plan ? (
           <>
             <MacroLine
               className="day-totals"
@@ -137,6 +137,13 @@ function DayColumn({
             />
             <FitRing actual={totals?.calories} target={calorieTarget} />
           </>
+        ) : (
+          day.status === 'empty' && (
+            <span className="day-closed" title="No menu published for this day">
+              <IconCalendarOff size={13} />
+              Closed
+            </span>
+          )
         )}
       </button>
 
@@ -166,8 +173,18 @@ function DayColumn({
             )}
           </>
         ) : (
+          // A hall that simply is not serving reads as "closed", not as a
+          // failure; only a real error gets the alarm glyph.
           <div className={`day-placeholder ${day.status}`}>
-            {day.message ?? 'Nothing here.'}
+            {day.status === 'error' ? (
+              <IconWarn size={16} />
+            ) : (
+              <IconCalendarOff size={16} />
+            )}
+            <span>
+              {day.message ??
+                (day.status === 'empty' ? 'No menu published.' : 'Nothing here.')}
+            </span>
           </div>
         )}
       </div>

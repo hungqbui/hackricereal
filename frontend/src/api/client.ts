@@ -62,7 +62,7 @@ async function request<T>(
     })
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause
-    throw new ApiError(0, 'Could not reach the CougarGrub API. Is the backend running?')
+    throw new ApiError(0, 'Could not reach the UniBite API. Is the backend running?')
   }
 
   if (response.status === 204) return undefined as T

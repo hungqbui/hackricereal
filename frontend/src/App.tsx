@@ -4,6 +4,7 @@ import { api } from './api/client'
 import type { Location } from './api/types'
 import { AuthScreen } from './components/AuthScreen'
 import {
+  LogoUniBite,
   IconLive,
   IconOffline,
   IconPin,
@@ -17,6 +18,7 @@ import { WeekBoard } from './components/WeekBoard'
 import { describeRange } from './lib/dates'
 import { interpret, type Interpretation } from './lib/parse'
 import { AuthProvider, useAuth } from './state/auth'
+import { useAvailability } from './state/availability'
 import { usePlanBoard } from './state/board'
 
 interface Health {
@@ -92,13 +94,18 @@ function Planner() {
     void generate({ ...spec, locationId: location.id, locationName: location.name })
   }, [generate, locations, spec])
 
+  // What the chosen hall actually serves on the chosen days, so the composer
+  // can stop offering periods that do not exist.
+  const availability = useAvailability(spec.locationId, spec.dates, spec.periods)
+
   const selectedDay = board?.days.find((day) => day.date === selectedDate) ?? null
 
   return (
     <div className="app">
       <header className="topbar">
         <p className="brand">
-          Cougar<span>Grub</span>
+          <LogoUniBite size={26} label="UniBite" />
+          UniBite
         </p>
 
         {board && (
@@ -173,6 +180,7 @@ function Planner() {
           edited={edited}
           busy={busy}
           compact={Boolean(board)}
+          availability={availability}
         />
 
         {board ? (
@@ -183,11 +191,11 @@ function Planner() {
           />
         ) : (
           <section className="hero">
-            <h1>Eat well on the meal plan, without reading a menu.</h1>
+            <h1>Your dining hall, planned better.</h1>
             <p>
-              Describe a day or a week in plain English. CougarGrub reads the
-              live UH dining menus, picks real items that hit your macros, and
-              lets you talk it into something better.
+              Describe a day or a week in plain English. UniBite reads the live
+              UH dining menus, picks real items that hit your macros, and lets
+              you talk it into something better.
             </p>
           </section>
         )}

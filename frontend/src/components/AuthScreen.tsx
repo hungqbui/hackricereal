@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 
 import { useAuth } from '../state/auth'
+import { LogoUniBite } from './icons'
 
 export function AuthScreen() {
   const { login, register } = useAuth()
@@ -28,11 +29,12 @@ export function AuthScreen() {
     <div className="auth-screen">
       <div className="auth-card">
         <p className="brand brand-lg">
-          Cougar<span>Grub</span>
+          <LogoUniBite size={34} label="UniBite" />
+          UniBite
         </p>
         <p className="auth-tagline">
-          Say how you want to eat. We build it from what the dining halls are
-          actually serving.
+          Your dining hall, planned better. Say how you want to eat; we build
+          it from what the halls are actually serving.
         </p>
 
         <form onSubmit={onSubmit} className="auth-form">

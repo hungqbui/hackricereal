@@ -1,44 +1,57 @@
-/* CougarGrub — one calm surface, one accent, everything else quiet. */
+/* UniBite — cream ground, deep green ink, one orange accent. */
 
 :root {
-  /* Warm, low-chroma ground so the terracotta accent can stay quiet. */
-  --bg: #f0eee6;
-  --surface: #faf9f5;
-  --surface-2: #e9e6dc;
-  --ink: #2e2b25;
-  --ink-2: #5d574c;
-  --ink-3: #8b8478;
-  --line: #ddd8cb;
-  --accent: #c15f3c;
-  --accent-strong: #a34d2f;
-  --accent-soft: #f6e7de;
-  --on: #5b7f52;
-  --near: #b07407;
+  /* Cream ground and deep-green ink from the UniBite mark; orange is the
+     single accent. Sage is a secondary surface, not a third accent. */
+  --bg: #f2efe4;
+  --surface: #fbfaf4;
+  --surface-2: #e8e4d6;
+  --sage: #8fae8a;
+  --sage-soft: #e2ebdf;
+  --brand: #2c3f33;
+  --ink: #263329;
+  --ink-2: #4e5c51;
+  --ink-3: #79876f;
+  --line: #dad5c4;
+  --accent: #e2832f;
+  /* White on --accent measures 2.7:1; this darker step clears 4.5:1. */
+  --accent-strong: #b25e19;
+  --accent-soft: #faead7;
+  --on: #4e7a52;
+  --near: #a86a06;
   --off: #b23b3b;
   --radius: 14px;
   --radius-sm: 9px;
-  --shadow: 0 1px 2px rgb(46 43 37 / 5%), 0 10px 28px rgb(46 43 37 / 7%);
-  --font-display: 'Caprasimo', ui-serif, Georgia, serif;
+  --shadow: 0 1px 2px rgb(38 51 41 / 5%), 0 10px 28px rgb(38 51 41 / 8%);
+  --font-display: 'Figtree', ui-sans-serif, system-ui, sans-serif;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #211f1a;
-    --surface: #2b2822;
-    --surface-2: #34302a;
-    --ink: #f2efe7;
-    --ink-2: #bdb6a8;
-    --ink-3: #8d8779;
-    --line: #413c34;
-    --accent: #e08159;
-    --accent-strong: #f0a180;
-    --accent-soft: #3b2a22;
-    --on: #8fb583;
+    --bg: #1e241f;
+    --surface: #262e27;
+    --surface-2: #303a31;
+    --sage: #6f8c6b;
+    --sage-soft: #2b3a2d;
+    --brand: #dfe8da;
+    --ink: #edf0e8;
+    --ink-2: #bcc5b8;
+    --ink-3: #8d9889;
+    --line: #3a443b;
+    --accent: #f0a05a;
+    --accent-strong: #e9a165;
+    --accent-soft: #33291f;
+    --on: #86b581;
     --near: #d9a441;
     --off: #ff7b7b;
-    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 28px rgb(0 0 0 / 30%);
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 28px rgb(0 0 0 / 32%);
     color-scheme: dark;
+  }
+
+  /* The dark-mode accent is light, so primary buttons take dark ink. */
+  .button.primary {
+    color: #21190f;
   }
 }
 
@@ -334,18 +347,24 @@ select:focus {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  font-size: 23px;
+  color: var(--brand);
 }
 
-.brand span {
-  color: var(--accent);
+.brand svg {
+  flex: none;
+  color: var(--brand);
 }
 
 .brand.brand-lg {
-  font-size: 26px;
+  font-size: 30px;
+  gap: 11px;
 }
 
 .topbar-context {
@@ -1451,4 +1470,79 @@ select:focus {
 
 .detail-notes.warn h3 svg {
   color: var(--near);
+}
+
+/* ------------------------------------------------- menu availability */
+
+/* A period the hall does not serve on the chosen days stays visible but
+   inert, so the absence is information rather than a missing control. */
+.chip.unserved {
+  opacity: 0.45;
+  cursor: not-allowed;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  background: transparent;
+  border-style: dashed;
+}
+
+.chip.unserved:hover {
+  border-color: var(--line);
+}
+
+/* Served on some of the chosen days, not all. */
+.chip.partial {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--near) 45%, var(--line));
+}
+
+.chip.partial svg:last-child {
+  color: var(--near);
+}
+
+.chip.removable.no-menu {
+  border-color: color-mix(in srgb, var(--near) 45%, var(--line));
+  color: var(--near);
+}
+
+.chip.removable.no-menu svg {
+  flex: none;
+}
+
+.availability-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+.availability-note svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.availability-note.warn {
+  color: var(--near);
+}
+
+/* "Closed" marker in a day-column header with no plan. */
+.day-closed {
+  grid-area: totals;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.day-placeholder svg {
+  flex: none;
+  color: var(--ink-3);
+}
+
+.day-placeholder.error svg {
+  color: var(--off);
 }
