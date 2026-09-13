@@ -143,17 +143,77 @@ async def test_protected_routes_require_a_valid_token(api, headers):
     assert resp.status_code in (401, 403)
 
 
-async def test_profile_targets_round_trip(api, auth):
-    headers, _ = auth
-    resp = await api.patch(
-        "/auth/me",
-        headers=headers,
-        json={"targets": {"calories": 2400, "protein_g": 150}, "dietary_notes": "vegan"},
-    )
+# ---------------------------------------------------------------------------
+# Profile
+# ---------------------------------------------------------------------------
 
-    assert resp.status_code == 200
-    assert resp.json()["targets"] == {"calories": 2400, "protein_g": 150}
-    assert (await api.get("/auth/me", headers=headers)).json()["dietary_notes"] == "vegan"
+
+async def test_profile_requires_a_token(api):
+    assert (await api.get("/profile")).status_code in (401, 403)
+    assert (await api.put("/profile", json={"diet": "vegan"})).status_code in (401, 403)
+
+
+async def test_profile_has_defaults_before_first_save(api, auth):
+    headers, _ = auth
+    body = (await api.get("/profile", headers=headers)).json()
+
+    assert body["calorie_goal"] == 2200
+    assert body["diet"] == "none"
+    assert body["allergies"] == []
+    assert body["updated_at"] is None
+
+
+async def test_profile_partial_updates_persist(api, auth):
+    headers, _ = auth
+    first = await api.put(
+        "/profile",
+        headers=headers,
+        json={
+            "diet": "vegetarian",
+            "allergies": ["Peanut", "Tree Nut"],
+            "avoid": ["mushrooms"],
+            "schedule": {"breakfast": "08:00", "lunch": "12:30", "dinner": "18:30"},
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    # A later save of one field leaves the others alone.
+    second = await api.put("/profile", headers=headers, json={"calorie_goal": 2600})
+    assert second.status_code == 200
+
+    body = (await api.get("/profile", headers=headers)).json()
+    assert body["calorie_goal"] == 2600
+    assert body["diet"] == "vegetarian"
+    assert body["allergies"] == ["Peanut", "Tree Nut"]
+    assert body["avoid"] == ["mushrooms"]
+    assert body["schedule"]["lunch"] == "12:30"
+    assert body["updated_at"] is not None
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"calorie_goal": 50},
+        {"protein_goal": 9000},
+        {"diet": "carnivore"},
+        {"schedule": {"lunch": "noon"}},
+        {"allergies": ["x"] * 21},
+    ],
+)
+async def test_profile_rejects_invalid_values(api, auth, patch):
+    headers, _ = auth
+    assert (await api.put("/profile", headers=headers, json=patch)).status_code == 422
+
+
+async def test_profiles_are_per_user(api, auth):
+    headers, _ = auth
+    await api.put("/profile", headers=headers, json={"diet": "vegan"})
+
+    other = await api.post(
+        "/auth/register", json={"email": "other@uh.edu", "password": "password123"}
+    )
+    other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+    assert (await api.get("/profile", headers=other_headers)).json()["diet"] == "none"
 
 
 # ---------------------------------------------------------------------------
@@ -226,10 +286,10 @@ async def test_generate_can_target_a_single_period(api, auth):
     assert {m["period_id"] for m in plan["content"]["meals"]} == {dinner["id"]}
 
 
-async def test_generate_falls_back_to_saved_profile_targets(api, auth):
+async def test_generate_falls_back_to_saved_profile_goals(api, auth):
     headers, _ = auth
-    await api.patch(
-        "/auth/me", headers=headers, json={"targets": {"calories": 1800}}
+    await api.put(
+        "/profile", headers=headers, json={"calorie_goal": 1800, "protein_goal": 90}
     )
 
     plan = (
@@ -240,8 +300,44 @@ async def test_generate_falls_back_to_saved_profile_targets(api, auth):
         )
     ).json()
 
-    assert plan["targets"] == {"calories": 1800}
+    assert plan["targets"] == {"calories": 1800, "protein_g": 90}
     assert "calories" in plan["content"]["target_fit"]
+
+    # Explicit targets on the request still win over the saved goals.
+    explicit = (await api.post("/plans/generate", headers=headers, json=GENERATE)).json()
+    assert explicit["targets"] == GENERATE["targets"]
+
+
+async def test_generate_without_a_profile_sets_no_targets(api, auth):
+    headers, _ = auth
+    plan = (
+        await api.post(
+            "/plans/generate",
+            headers=headers,
+            json={"location_id": MOODY, "date": DATE_A},
+        )
+    ).json()
+
+    assert plan["targets"] == {}
+
+
+async def test_offline_planner_honours_saved_allergies(api, auth):
+    headers, _ = auth
+    await api.put("/profile", headers=headers, json={"allergies": ["Milk", "Egg"]})
+
+    plan = (
+        await api.post(
+            "/plans/generate",
+            headers=headers,
+            json={"location_id": MOODY, "date": DATE_A},
+        )
+    ).json()
+
+    items = plan_items(plan["content"])
+    assert items
+    for item in items:
+        allergens = {a.lower() for a in item["allergens"]}
+        assert not {"milk", "egg"} & allergens, item["name"]
 
 
 async def test_generate_rejects_a_period_not_served_that_day(api, auth):

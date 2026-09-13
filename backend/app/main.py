@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import engine, init_models
-from .routers import auth, dining, plans
+from .routers import auth, dining, plans, profile
 from .services.dineoncampus import DineOnCampusClient
 
 logger = logging.getLogger("cougargrub")
@@ -48,6 +48,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(dining.router)
 app.include_router(plans.router)
+app.include_router(profile.router)
 
 
 @app.get("/health", tags=["meta"])

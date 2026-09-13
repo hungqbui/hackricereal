@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
 
     dineoncampus_site_id: str = "5925f42eee596f0f95969b10"
-    dineoncampus_cache_ttl: int = 900
 
     cors_origins: str = "*"
 

@@ -20,7 +20,7 @@ happen to be serving.
 `tests/fixtures/` holds real payloads recorded from DineOnCampus: two
 different dates at Moody Towers plus one day at Cougar Woods. The
 `upstream` fixture swaps the client's **HTTP session** (not `_get`), so
-caching, retries and error handling still run for real. Any request the
+retries and error handling still run for real. Any request the
 recordings do not cover returns 404, so a test can never silently fall
 through to the live API.
 

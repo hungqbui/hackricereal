@@ -5,6 +5,7 @@ construction, JSON/tool-call parsing, item validation against the menu,
 macro recomputation, and revision bookkeeping.
 """
 
+import copy
 import json
 
 import pytest
@@ -159,6 +160,37 @@ async def test_generation_prompt_carries_menu_targets_and_constraints(
     assert prompt.count("### PERIOD") == 4
 
 
+async def test_generation_prompt_carries_the_saved_profile(api, auth, fake_gemini):
+    headers, _ = auth
+    await api.put(
+        "/profile",
+        headers=headers,
+        json={
+            "diet": "pescatarian",
+            "allergies": ["Sesame"],
+            "avoid": ["anything fried"],
+            "schedule": {"lunch": "12:30"},
+        },
+    )
+    catalog = await catalog_for(api)
+    await make_plan(api, headers, fake_gemini, catalog)
+
+    prompt = fake_gemini.prompts[0]
+    profile_block = prompt.split("STANDING DIETARY PROFILE:")[1].split("REQUEST FROM")[0]
+    assert "Diet: pescatarian" in profile_block
+    assert "Allergic to Sesame" in profile_block
+    assert "avoid anything fried" in profile_block
+    assert "lunch 12:30" in profile_block
+
+
+async def test_generation_prompt_without_a_profile_says_so(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    await make_plan(api, headers, fake_gemini, catalog)
+
+    assert "STANDING DIETARY PROFILE:\n(none on file)" in fake_gemini.prompts[0]
+
+
 async def test_generation_requests_structured_json(api, auth, fake_gemini):
     headers, _ = auth
     catalog = await catalog_for(api)
@@ -298,6 +330,28 @@ async def test_refine_prompt_includes_the_current_plan_and_instruction(
     assert "less sodium please" in prompt
     assert target["item_id"] in prompt
     assert "CURRENT PLAN" in prompt
+
+
+async def test_refine_prompt_uses_the_profile_as_it_is_now(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    target = plan_items(plan["content"])[0]
+
+    # Saved after the plan was generated.
+    await api.put("/profile", headers=headers, json={"allergies": ["Shellfish"]})
+
+    fake_gemini.script_tool_call("adjust_meal_items", {
+        "rationale": "ok",
+        "changes": [{"action": "remove",
+                     "period_id": plan["content"]["meals"][0]["period_id"],
+                     "item_id": target["item_id"]}],
+    })
+    await api.post(
+        f"/plans/{plan['id']}/refine", headers=headers, json={"instruction": "tweak"}
+    )
+
+    assert "Allergic to Shellfish" in fake_gemini.prompts[-1]
 
 
 async def test_adjust_tool_removes_an_item_and_recomputes_macros(
@@ -518,3 +572,136 @@ async def test_empty_instruction_is_rejected(api, auth, fake_gemini):
         f"/plans/{plan['id']}/refine", headers=headers, json={"instruction": ""}
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Review before saving: propose, then apply
+# ---------------------------------------------------------------------------
+
+
+async def _propose_removal(api, headers, fake_gemini, plan):
+    """Script a one-item removal and return (removed item, proposal)."""
+    meal = plan["content"]["meals"][0]
+    target = meal["items"][0]
+    fake_gemini.script_tool_call("adjust_meal_items", {
+        "rationale": "Dropped it.",
+        "changes": [{"action": "remove", "period_id": meal["period_id"],
+                     "item_id": target["item_id"]}],
+    })
+    resp = await api.post(
+        f"/plans/{plan['id']}/propose", headers=headers, json={"instruction": "drop it"}
+    )
+    assert resp.status_code == 200, resp.text
+    return target, resp.json()
+
+
+def _meal(content, period_id):
+    return next(m for m in content["meals"] if m["period_id"] == period_id)
+
+
+async def test_propose_returns_a_change_without_saving_it(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    target, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+
+    period_id = plan["content"]["meals"][0]["period_id"]
+    assert proposal["plan_id"] == plan["id"]
+    assert proposal["base_revision"] == 0
+    assert proposal["tool_used"] == "adjust_meal_items"
+    assert proposal["rationale"] == "Dropped it."
+    assert target["item_id"] not in {
+        i["item_id"] for i in _meal(proposal["content"], period_id)["items"]
+    }
+    assert_plan_is_coherent(proposal["content"], catalog)
+
+    stored = (await api.get(f"/plans/{plan['id']}", headers=headers)).json()
+    assert stored["revision_count"] == 0
+    assert stored["content"] == plan["content"]
+
+
+async def test_apply_saves_a_confirmed_proposal(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    _, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+
+    resp = await api.post(f"/plans/{plan['id']}/apply", headers=headers, json=proposal)
+    assert resp.status_code == 200, resp.text
+    saved = resp.json()
+
+    assert saved["revision_count"] == 1
+    assert saved["content"] == proposal["content"]
+    assert saved["revisions"][-1]["tool_used"] == "adjust_meal_items"
+    assert saved["revisions"][-1]["instruction"] == "drop it"
+    assert saved["revisions"][-1]["rationale"] == "Dropped it."
+
+
+async def test_apply_recomputes_what_the_client_sends(api, auth, fake_gemini):
+    """An edited proposal cannot store invented nutrition or items."""
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    _, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+
+    tampered = copy.deepcopy(proposal)
+    first = tampered["content"]["meals"][0]["items"][0]
+    first["calories"] = 1
+    tampered["content"]["totals"]["calories"] = 1
+    tampered["content"]["meals"][0]["items"].append({"item_id": "ghost", "servings": 1})
+
+    saved = (
+        await api.post(f"/plans/{plan['id']}/apply", headers=headers, json=tampered)
+    ).json()
+
+    items = plan_items(saved["content"])
+    assert "ghost" not in {i["item_id"] for i in items}
+    kept = next(i for i in items if i["item_id"] == first["item_id"])
+    assert kept["calories"] == catalog[first["item_id"]]["calories"]
+    assert saved["content"]["totals"]["calories"] > 1
+    assert_plan_is_coherent(saved["content"], catalog)
+
+
+async def test_stale_or_malformed_proposals_are_rejected(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    _, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+    url = f"/plans/{plan['id']}/apply"
+
+    bad_tool = await api.post(url, headers=headers, json={**proposal, "tool_used": "initial"})
+    assert bad_tool.status_code == 422
+
+    assert (await api.post(url, headers=headers, json=proposal)).status_code == 200
+    # The plan moved on; the same proposal is now out of date.
+    again = await api.post(url, headers=headers, json=proposal)
+    assert again.status_code == 409
+
+
+async def test_proposals_are_owner_only(api, auth, fake_gemini):
+    headers, _ = auth
+    catalog = await catalog_for(api)
+    plan = await make_plan(api, headers, fake_gemini, catalog)
+    _, proposal = await _propose_removal(api, headers, fake_gemini, plan)
+
+    other = await api.post(
+        "/auth/register", json={"email": "other@uh.edu", "password": "password123"}
+    )
+    other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+
+    propose = await api.post(
+        f"/plans/{plan['id']}/propose", headers=other_headers, json={"instruction": "x"}
+    )
+    apply = await api.post(f"/plans/{plan['id']}/apply", headers=other_headers, json=proposal)
+    assert propose.status_code == 404
+    assert apply.status_code == 404
+
+
+async def test_propose_requires_gemini(api, auth):
+    headers, _ = auth
+    plan = (await api.post("/plans/generate", headers=headers, json=GENERATE)).json()
+
+    resp = await api.post(
+        f"/plans/{plan['id']}/propose", headers=headers, json={"instruction": "more fiber"}
+    )
+    assert resp.status_code == 503

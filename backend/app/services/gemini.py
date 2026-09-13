@@ -230,6 +230,32 @@ def build_menu_prompt(menus: list[dict], max_items_per_period: int = 250) -> str
     return "\n\n".join(blocks)
 
 
+def build_profile_notes(profile: dict | None) -> str | None:
+    """Render a saved student profile as the standing dietary profile.
+
+    One fact per line, each ending in a period: the offline fallback's
+    keyword matcher reads this text too, and stops a match at punctuation.
+    Numeric goals are left out; they travel as targets.
+    """
+    if not profile:
+        return None
+
+    lines: list[str] = []
+    diet = profile.get("diet")
+    if diet and diet != "none":
+        lines.append(f"- Diet: {diet}. Follow it strictly.")
+    for allergen in profile.get("allergies") or []:
+        lines.append(f"- Allergic to {allergen}. Never include it.")
+    for food in profile.get("avoid") or []:
+        lines.append(f"- Would rather avoid {food}.")
+    schedule = profile.get("schedule") or {}
+    if schedule:
+        times = ", ".join(f"{meal} {time}" for meal, time in schedule.items())
+        lines.append(f"- Usual meal times: {times}.")
+
+    return "\n".join(lines) or None
+
+
 def build_request_prompt(
     menus: list[dict],
     targets: dict,
